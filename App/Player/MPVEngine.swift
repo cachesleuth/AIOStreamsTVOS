@@ -238,6 +238,15 @@ final class MPVEngine {
         emit { $0.engineVideo(format) }
     }
 
+    /// Reads on mpv's queue and answers on the main thread, which mpv's video output may be waiting on.
+    func properties(_ names: [String], done: @escaping ([String: String]) -> Void) {
+        queue.async { [self] in
+            var values: [String: String] = [:]
+            for name in names { values[name] = property(name) }
+            DispatchQueue.main.async { done(values) }
+        }
+    }
+
     /// Reads on the calling thread; libmpv's getters are thread-safe.
     func property(_ name: String) -> String? {
         guard let mpv, let value = mpv_get_property_string(mpv, name) else { return nil }

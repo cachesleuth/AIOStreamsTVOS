@@ -141,7 +141,12 @@ final class PlayerChannel: MPVEngineListener {
     private var videoFormat: VideoFormat?
 
     func engineVideo(_ format: VideoFormat) {
-        guard loaded, format != videoFormat else { return }
+        guard loaded else {
+            DisplayMode.lastReport = "video reported (\(format.primaries), \(format.gamma)) while nothing was loaded; not applied"
+            NSLog("[display] %@", DisplayMode.lastReport)
+            return
+        }
+        guard format != videoFormat else { return }
         videoFormat = format
         if format.needsDolbyVisionProcessing {
             NSLog("[player] Dolby Vision profile 5 has no HDR10 base layer; its colours will be off")

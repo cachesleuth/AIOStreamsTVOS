@@ -78,12 +78,31 @@ enum AppAnswers {
         ]
     }
 
-    static func diagnostics(engine: MPVEngine?, web: String?, server: String?) -> Message {
+    /// The mpv properties `videoLines` reads.
+    static let videoProperties = [
+        "current-vo", "hwdec-current", "video-params/pixelformat", "video-params/primaries", "video-params/gamma",
+    ]
+
+    /// How the video plays and what the TV was asked for, from `videoProperties`' values.
+    static func videoLines(_ values: [String: String], window: UIWindow?) -> [String] {
+        let matching = DisplayMode.matchingEnabled(in: window).map { $0 ? "on" : "off" } ?? "unknown"
+        return [
+            "Video output: \(values["current-vo"] ?? "none")",
+            "Decoder: \(values["hwdec-current"] ?? "none")",
+            "Pixel format: \(values["video-params/pixelformat"] ?? "none")",
+            "Colours: \(values["video-params/primaries"] ?? "?"), \(values["video-params/gamma"] ?? "?")",
+            "Match Content: \(matching)",
+            "Display request: \(DisplayMode.lastReport)",
+        ]
+    }
+
+    static func diagnostics(engine: MPVEngine?, video: [String: String], window: UIWindow?, web: String?, server: String?) -> Message {
         let lines = [
             "AIOStreams for Apple TV \(Identity.version)",
             "tvOS \(UIDevice.current.systemVersion), \(UIDevice.current.model)",
             "mpv: \(engine?.property("mpv-version") ?? "not started")",
             "FFmpeg: \(engine?.property("ffmpeg-version") ?? "unknown")",
+        ] + videoLines(video, window: window) + [
             "Web app: \(web ?? "unknown")",
             "Server: \(server ?? "none")",
         ]

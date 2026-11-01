@@ -38,8 +38,21 @@ struct VideoFormat: Equatable {
  * on in Settings → Video and Audio. As the working aiostreams-tvos project does.
  */
 enum DisplayMode {
-    static func apply(_ format: VideoFormat, in window: UIWindow?) {
-        guard let manager = window?.avDisplayManager else { return }
+    /// What was last asked of tvOS and what it said, for the diagnostics.
+    static var lastReport = "no video played yet"
+
+    /// Whether tvOS switches the TV's mode at all: Match Content in Settings.
+    static func matchingEnabled(in window: UIWindow?) -> Bool? {
+        window?.avDisplayManager.isDisplayCriteriaMatchingEnabled
+    }
+
+    @discardableResult
+    static func apply(_ format: VideoFormat, in window: UIWindow?) -> String {
+        guard let manager = window?.avDisplayManager else {
+            lastReport = "no window to ask for a display mode"
+            NSLog("[display] %@", lastReport)
+            return lastReport
+        }
         let fps = format.fps > 0 ? format.fps : 24
         var extensions: [String: Any] = [kCMFormatDescriptionExtension_FullRangeVideo as String: false]
         switch format.range {
@@ -63,12 +76,43 @@ enum DisplayMode {
             extensions: extensions as CFDictionary,
             formatDescriptionOut: &description
         )
-        guard status == noErr, let description else { return }
+        let video = "primaries \(format.primaries.isEmpty ? "?" : format.primaries), "
+            + "gamma \(format.gamma.isEmpty ? "?" : format.gamma), "
+            + "Dolby Vision \(format.dolbyVisionProfile.map { String($0) } ?? "no"), "
+            + String(format: "%.3f fps", fps)
+        guard status == noErr, let description else {
+            lastReport = "\(video) → couldn't describe the mode (\(status))"
+            NSLog("[display] %@", lastReport)
+            return lastReport
+        }
+        watchSwitches()
         manager.preferredDisplayCriteria = AVDisplayCriteria(refreshRate: Float(fps), formatDescription: description)
+        lastReport = "\(video) → asked for \(format.range); Match Content "
+            + (manager.isDisplayCriteriaMatchingEnabled ? "on" : "off")
+            + (manager.isDisplayModeSwitchInProgress ? ", switching" : "")
+        NSLog("[display] %@", lastReport)
+        return lastReport
+    }
+
+    private static var watching: [NSObjectProtocol] = []
+
+    /// Notes when tvOS starts and ends a mode switch, so the report says whether it acted on the request.
+    private static func watchSwitches() {
+        guard watching.isEmpty else { return }
+        for (name, said) in [
+            (Notification.Name.AVDisplayManagerModeSwitchStart, "tvOS started a mode switch"),
+            (Notification.Name.AVDisplayManagerModeSwitchEnd, "tvOS finished a mode switch"),
+        ] {
+            watching.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+                lastReport += "; \(said)"
+                NSLog("[display] %@", said)
+            })
+        }
     }
 
     /// Back to the TV's own mode once nothing plays.
     static func reset(in window: UIWindow?) {
         window?.avDisplayManager.preferredDisplayCriteria = nil
+        NSLog("[display] back to the TV's own mode")
     }
 }

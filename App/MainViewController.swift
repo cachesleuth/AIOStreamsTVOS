@@ -167,7 +167,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
             )
             // HDR10, HLG or SDR at the video's frame rate, where Match Content is on.
             player.onVideoFormat = { [weak self] format in
-                guard let window = self?.view.window else { return }
+                let window = self?.view.window
                 if let format { DisplayMode.apply(format, in: window) } else { DisplayMode.reset(in: window) }
             }
             self.player = player
@@ -211,11 +211,24 @@ final class MainViewController: UIViewController, RemoteReceiver {
 
     // MARK: The app's own screens
 
+    /// mpv's view of the video, read off the main thread.
+    private func readVideo(_ done: @escaping ([String: String]) -> Void) {
+        guard let engine else { return done([:]) }
+        engine.properties(AppAnswers.videoProperties, done: done)
+    }
+
     private func showAppMenu() {
+        guard presentedViewController == nil else { return }
+        readVideo { [weak self] video in self?.presentAppMenu(video: video) }
+    }
+
+    /// With how the video plays and what the TV was asked for, to see why HDR doesn't reach the TV.
+    private func presentAppMenu(video: [String: String]) {
         guard presentedViewController == nil else { return }
         let menu = UIAlertController(
             title: "AIOStreams",
-            message: "App \(Identity.version) · web app \(WebApp.commit) · \(storage.keyCount) saved keys",
+            message: "App \(Identity.version) · web app \(WebApp.commit) · \(storage.keyCount) saved keys\n\n"
+                + AppAnswers.videoLines(video, window: view.window).joined(separator: "\n"),
             preferredStyle: .actionSheet
         )
         menu.addAction(UIAlertAction(title: "Reload", style: .default) { [weak self] _ in
@@ -341,7 +354,13 @@ final class MainViewController: UIViewController, RemoteReceiver {
             engine?.reloadConfig()
             sendToPage(["type": "mpv-config", "text": MPVConfig.text])
         case "diagnostics":
-            sendToPage(AppAnswers.diagnostics(engine: engine, web: message.text("web"), server: message.text("server")))
+            readVideo { [weak self] video in
+                guard let self else { return }
+                self.sendToPage(AppAnswers.diagnostics(
+                    engine: self.engine, video: video, window: self.view.window,
+                    web: message.text("web"), server: message.text("server")
+                ))
+            }
         case "licenses":
             sendToPage(AppAnswers.licenses)
         case "crash-report":
