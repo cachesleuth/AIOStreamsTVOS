@@ -172,6 +172,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
                 showVideo: { [weak self] in self?.videoView.isHidden = !$0 }
             )
             // HDR10, HLG or SDR at the video's frame rate, where Match Content is on.
+            player.onStatsPage = { [weak self] page in self?.showStats(page) }
             player.onVideoFormat = { [weak self] format in
                 let window = self?.view.window
                 if let format { DisplayMode.apply(format, in: window) } else { DisplayMode.reset(in: window) }
@@ -180,6 +181,50 @@ final class MainViewController: UIViewController, RemoteReceiver {
         } catch {
             NSLog("[app] mpv did not start: %@", String(describing: error))
         }
+    }
+
+    // MARK: Statistics
+
+    private var statsLabel: UILabel?
+    private var statsTimer: Timer?
+    private var statsPage: String?
+
+    /// Over the page, top left, refreshed every second while a page of statistics shows.
+    private func showStats(_ page: String?) {
+        statsPage = page
+        statsTimer?.invalidate()
+        statsTimer = nil
+        guard let page else {
+            statsLabel?.removeFromSuperview()
+            statsLabel = nil
+            return
+        }
+        let label: UILabel
+        if let shown = statsLabel {
+            label = shown
+        } else {
+            label = PaddedLabel()
+            label.numberOfLines = 0
+            label.font = .monospacedSystemFont(ofSize: 22, weight: .regular)
+            label.textColor = .white
+            label.backgroundColor = UIColor(white: 0, alpha: 0.7)
+            label.layer.cornerRadius = 12
+            label.layer.masksToBounds = true
+            label.isUserInteractionEnabled = false
+            view.addSubview(label)
+            statsLabel = label
+        }
+        let refresh = { [weak self] in
+            self?.engine?.stats(page: page) { text in
+                guard let self, self.statsPage == page, let label = self.statsLabel else { return }
+                label.text = text
+                let size = label.sizeThatFits(CGSize(width: self.view.bounds.width * 0.6, height: .greatestFiniteMagnitude))
+                label.frame = CGRect(origin: CGPoint(x: 80, y: 60), size: size)
+            }
+        }
+        refresh()
+        view.bringSubviewToFront(label)
+        statsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in refresh() }
     }
 
     // MARK: Remote
@@ -429,5 +474,19 @@ final class MainViewController: UIViewController, RemoteReceiver {
 
     func appDidBecomeActive() {
         web?.focusPage()
+    }
+}
+
+/// A label with room around its text, for the statistics.
+private final class PaddedLabel: UILabel {
+    private let inset = UIEdgeInsets(top: 16, left: 20, bottom: 16, right: 20)
+
+    override func drawText(in rect: CGRect) {
+        super.drawText(in: rect.inset(by: inset))
+    }
+
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        let inner = super.sizeThatFits(CGSize(width: size.width - inset.left - inset.right, height: size.height))
+        return CGSize(width: inner.width + inset.left + inset.right, height: inner.height + inset.top + inset.bottom)
     }
 }

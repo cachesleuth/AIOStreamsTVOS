@@ -216,8 +216,7 @@ final class MPVEngine {
             // The user's mpv.conf may size the cache instead.
             let config = (try? String(contentsOf: configFile, encoding: .utf8)) ?? ""
             if !config.contains("demuxer-max-bytes") {
-                // The page offers up to 1 GB, more than a TV can hold beside the web page.
-                let budget = min(settings.cacheMb > 0 ? settings.cacheMb : Self.defaultCacheMb, Self.maxCacheMb) << 20
+                let budget = (settings.cacheMb > 0 ? settings.cacheMb : Self.defaultCacheMb) << 20
                 set("demuxer-max-bytes", String(budget - budget / 4))
                 set("demuxer-max-back-bytes", String(budget / 4))
             }
@@ -240,6 +239,70 @@ final class MPVEngine {
             dolbyVisionProfile: dolbyVision
         )
         emit { $0.engineVideo(format) }
+    }
+
+    /**
+     * One of the page's statistics pages, as text. mpv's own overlay is its
+     * stats.lua, and tvOS's libmpv has no Lua, so the app writes the pages
+     * from mpv's properties. Reads on mpv's queue, answers on the main thread.
+     */
+    func stats(page: String, done: @escaping (String) -> Void) {
+        queue.async { [self] in
+            func osd(_ name: String) -> String {
+                guard let mpv, let value = mpv_get_property_osd_string(mpv, name) else { return "–" }
+                defer { mpv_free(value) }
+                let text = String(cString: value)
+                return text.isEmpty ? "–" : text
+            }
+            func line(_ label: String, _ value: String) -> String {
+                label.padding(toLength: 12, withPad: " ", startingAt: 0) + value
+            }
+            var lines: [String]
+            switch page {
+            case "2":
+                lines = [
+                    "Frame timings",
+                    line("Display", "\(osd("display-fps")) Hz"),
+                    line("Video", "\(osd("container-fps")) fps, estimated \(osd("estimated-vf-fps"))"),
+                    line("A/V sync", osd("avsync")),
+                    line("Dropped", "\(osd("frame-drop-count")) output, \(osd("decoder-frame-drop-count")) decoder"),
+                    line("Mistimed", osd("mistimed-frame-count")),
+                    line("Delayed", osd("vo-delayed-frame-count")),
+                ]
+            case "3":
+                lines = [
+                    "Cache",
+                    line("Ahead", osd("demuxer-cache-duration")),
+                    line("Held", osd("demuxer-cache-state/fw-bytes")),
+                    line("Reading", "\(osd("cache-speed"))/s"),
+                    line("Most", "\(osd("demuxer-max-bytes")) ahead, \(osd("demuxer-max-back-bytes")) behind"),
+                    line("Waiting", osd("paused-for-cache")),
+                ]
+            case "5":
+                lines = ["Tracks"]
+                for kind in ["video", "audio", "sub"] {
+                    let codec = osd("current-tracks/\(kind)/codec")
+                    let title = osd("current-tracks/\(kind)/title")
+                    let lang = osd("current-tracks/\(kind)/lang")
+                    let name = ["video": "Video", "audio": "Audio", "sub": "Subtitles"][kind] ?? kind
+                    lines.append(line(name, codec == "–" ? "none" : "\(codec) · \(lang) · \(title)"))
+                }
+            default:
+                lines = [
+                    "Playback",
+                    line("Video", "\(osd("video-codec")) \(osd("video-params/w"))×\(osd("video-params/h")) \(osd("container-fps")) fps"),
+                    line("Decoder", "\(osd("hwdec-current")) · \(osd("video-params/pixelformat"))"),
+                    line("Colour", "\(osd("video-params/primaries")) · \(osd("video-params/gamma"))"),
+                    line("Bitrate", "video \(osd("video-bitrate")) · audio \(osd("audio-bitrate"))"),
+                    line("Audio", "\(osd("audio-codec-name")) \(osd("audio-params/channel-count")) ch \(osd("audio-params/samplerate")) Hz"),
+                    line("Output", "\(osd("current-ao")) · \(osd("audio-out-params/format"))"),
+                    line("Dropped", "\(osd("frame-drop-count")) output, \(osd("decoder-frame-drop-count")) decoder"),
+                    line("Cache", "\(osd("demuxer-cache-duration")) ahead"),
+                ]
+            }
+            let text = lines.joined(separator: "\n")
+            DispatchQueue.main.async { done(text) }
+        }
     }
 
     /// Reads on mpv's queue and answers on the main thread, which mpv's video output may be waiting on.
@@ -419,8 +482,6 @@ final class MPVEngine {
     // MARK: Helpers
 
     private static let defaultCacheMb = 150
-    /// As the working aiostreams-tvos project caps it.
-    private static let maxCacheMb = 400
     private static let pictureCodecs: Set<String> = ["hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"]
 
     private static let observed: [(String, mpv_format)] = [

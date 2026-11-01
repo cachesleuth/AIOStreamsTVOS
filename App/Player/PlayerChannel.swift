@@ -48,6 +48,7 @@ final class PlayerChannel: MPVEngineListener {
                 engine.load(request)
             case "player-stop":
                 loaded = false
+                onStatsPage(nil)
                 engine.stop()
                 updateIdleTimer()
                 endVideo()
@@ -86,7 +87,10 @@ final class PlayerChannel: MPVEngineListener {
                 send(["type": "player-thumbnail", "url": message.text("url") ?? "", "src": NSNull()])
             case "player-subtitle-index":
                 send(["type": "player-subtitle-index", "tracks": NSNull()])
-            case "player-subtitle-lines", "player-skips", "player-stats-overlay", "player-stats",
+            case "player-stats-overlay":
+                // mpv's overlay is a Lua script, which tvOS's libmpv lacks, so the app draws its own.
+                onStatsPage(message.text("page"))
+            case "player-subtitle-lines", "player-skips", "player-stats",
                  "player-controls", "player-retry", "player-unqueue":
                 break
             default:
@@ -138,6 +142,9 @@ final class PlayerChannel: MPVEngineListener {
     func engineEvent(_ name: String) {
         send(["type": "player-event", "name": name])
     }
+
+    /// The statistics page the page asks to show, or nil to hide them.
+    var onStatsPage: (String?) -> Void = { _ in }
 
     /// The TV's picture mode follows the video; nil goes back to the TV's own.
     var onVideoFormat: (VideoFormat?) -> Void = { _ in }
