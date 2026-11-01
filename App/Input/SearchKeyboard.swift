@@ -47,6 +47,7 @@ final class SearchKeyboard: NSObject, UISearchResultsUpdating, UISearchBarDelega
         container.view.backgroundColor = .clear
         search.view.backgroundColor = .clear
         below.leave = { [weak container] in container?.dismiss(animated: true) }
+        below.moved = { [weak container] in container?.view.setNeedsLayout() }
         container.disappeared = { [weak self] in self?.close() }
     }
 
@@ -74,9 +75,33 @@ final class SearchKeyboard: NSObject, UISearchResultsUpdating, UISearchBarDelega
     }
 }
 
-/// Reports when it goes, however it was closed: Menu, moving off the keyboard, or return.
+/**
+ * Reports when it goes, however it was closed: Menu, moving off the keyboard,
+ * or return. Draws a solid backdrop behind the keyboard, so the page doesn't
+ * show through its keys; the page still shows below it, where the results are.
+ */
 private final class Container: UISearchContainerViewController {
     var disappeared: () -> Void = {}
+    private let backdrop = UIView()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        backdrop.backgroundColor = .systemBackground
+        backdrop.isUserInteractionEnabled = false
+        view.insertSubview(backdrop, at: 0)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        view.sendSubviewToBack(backdrop)
+        // Down to where the space below the keyboard starts; the whole screen until tvOS shows it.
+        var bottom = view.bounds.maxY
+        if let below = searchController.searchResultsController?.view, below.window != nil, !below.isHidden, below.alpha > 0 {
+            let top = below.convert(below.bounds, to: view).minY
+            if top > 0, top < view.bounds.maxY { bottom = top }
+        }
+        backdrop.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: bottom)
+    }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
@@ -102,8 +127,29 @@ private final class BelowKeyboard: UIViewController {
         view.addSubview(trap)
     }
 
+    /// Where it sits changed, so the backdrop above it follows.
+    var moved: () -> Void = {}
+
+    private var placed: CGRect?
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // Only when it really moved, so the two layouts can't keep starting each other.
+        let now = view.convert(view.bounds, to: nil)
+        guard now != placed else { return }
+        placed = now
+        moved()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        placed = nil
+        moved()
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        moved()
         // Only once the keyboard has taken focus, so it can't land here as the keyboard opens.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.trap.armed = true }
     }
