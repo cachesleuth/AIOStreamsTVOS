@@ -1,0 +1,149 @@
+import UIKit
+
+/// Who the app is to the page and to Jellyfin servers.
+enum Identity {
+    static let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
+
+    /// Kept by the app, since the page's storage may be cleared with the caches.
+    static let deviceId: String = {
+        let key = "aiostreams.deviceId"
+        if let saved = UserDefaults.standard.string(forKey: key) { return saved }
+        let id = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        UserDefaults.standard.set(id, forKey: key)
+        return id
+    }()
+
+    static let device = UIDevice.current.name.isEmpty ? "Apple TV" : UIDevice.current.name
+
+    static var script: BridgeScript.Identity {
+        BridgeScript.Identity(version: version, device: device, deviceId: deviceId)
+    }
+
+    /// Ends in "iPad" so the web app offers the iOS players (Infuse, VLC) for external playback.
+    static var userAgent: String {
+        let os = UIDevice.current.systemVersion.replacingOccurrences(of: ".", with: "_")
+        return "Mozilla/5.0 (iPad; CPU OS \(os) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) AIOStreamsTV/\(version)"
+    }
+}
+
+/// The app's folders. tvOS keeps only caches on disk, which it may clear when space runs low.
+enum AppFolders {
+    static let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+    static let mpv = caches.appendingPathComponent("mpv", isDirectory: true)
+    static let shaders = caches.appendingPathComponent("shaders", isDirectory: true)
+    static let subtitles = caches.appendingPathComponent("subtitles", isDirectory: true)
+
+    static func create() {
+        for folder in [mpv, shaders, subtitles] {
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
+    }
+}
+
+/**
+ * A copy of the page's localStorage in the user defaults, which tvOS keeps
+ * when it clears caches. The defaults are small on tvOS, so large values
+ * (cached pages rather than settings and sign-ins) are left out.
+ */
+enum WebStorageMirror {
+    private static let key = "aiostreams.webStorage"
+    private static let maxValue = 64 * 1024
+    private static let maxTotal = 400 * 1024
+
+    static func load() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+    }
+
+    static func save(_ items: Message) {
+        var kept: [String: String] = [:]
+        var total = 0
+        let small = items.compactMap { key, value -> (String, String)? in
+            guard let text = value as? String, text.utf8.count <= maxValue else { return nil }
+            return (key, text)
+        }.sorted { $0.1.utf8.count < $1.1.utf8.count }
+        for (key, text) in small {
+            total += key.utf8.count + text.utf8.count
+            if total > maxTotal { break }
+            kept[key] = text
+        }
+        UserDefaults.standard.set(kept, forKey: key)
+    }
+}
+
+/// The user's mpv.conf, kept in the defaults and written where mpv reads it at each start.
+enum MPVConfig {
+    private static let key = "aiostreams.mpvConf"
+    static var file: URL { AppFolders.mpv.appendingPathComponent("mpv.conf") }
+
+    static let starter = """
+    # mpv's own options, read at start and when saved here.
+    # See https://mpv.io/manual/stable/#options. The app keeps idle, keep-open,
+    # force-window, osc, osd-bar, ytdl and the key bindings as it needs them.
+    #
+    # profile=fast
+    # deband=yes
+
+    """
+
+    static var text: String {
+        UserDefaults.standard.string(forKey: key) ?? starter
+    }
+
+    static func save(_ text: String) {
+        UserDefaults.standard.set(text, forKey: key)
+        writeFile()
+    }
+
+    static func writeFile() {
+        try? text.write(to: file, atomically: true, encoding: .utf8)
+    }
+}
+
+/// Answers to the page's requests about the app itself.
+enum AppAnswers {
+    static func appInfo(engine: MPVEngine?) -> Message {
+        [
+            "type": "app-info",
+            "app": "\(Identity.version) (tvOS)",
+            "platform": "android",
+            "mpv": nullable(engine?.property("mpv-version")),
+            "ffmpeg": nullable(engine?.property("ffmpeg-version")),
+            "ac3Encoder": false,
+        ]
+    }
+
+    static func diagnostics(engine: MPVEngine?, web: String?, server: String?) -> Message {
+        let lines = [
+            "AIOStreams for Apple TV \(Identity.version)",
+            "tvOS \(UIDevice.current.systemVersion), \(UIDevice.current.model)",
+            "mpv: \(engine?.property("mpv-version") ?? "not started")",
+            "FFmpeg: \(engine?.property("ffmpeg-version") ?? "unknown")",
+            "Web app: \(web ?? "unknown")",
+            "Server: \(server ?? "none")",
+        ]
+        return ["type": "diagnostics", "text": lines.joined(separator: "\n")]
+    }
+
+    static let licenses: Message = [
+        "type": "licenses",
+        "texts": [
+            "GNU Lesser General Public License, version 3: https://www.gnu.org/licenses/lgpl-3.0.html",
+            "GNU Lesser General Public License, version 2.1 or later: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html",
+        ],
+        "libraries": [
+            ["name": "MPVKit", "licence": "LGPL-3.0", "url": "https://github.com/mpvkit/MPVKit", "texts": [0]],
+            ["name": "mpv", "licence": "LGPL-2.1-or-later", "url": "https://mpv.io", "texts": [1]],
+            ["name": "FFmpeg", "licence": "LGPL-2.1-or-later", "url": "https://ffmpeg.org", "texts": [1]],
+        ] as [Message],
+    ]
+
+    /// This app doesn't update itself; it's built and installed from Xcode.
+    static let updateState: Message = [
+        "type": "update-state", "state": "off", "channel": NSNull(), "version": NSNull(), "error": NSNull(),
+    ]
+}
+
+/// Back to the TV's home screen, as the Menu button does. tvOS has no public call for it.
+func suspendApp() {
+    UIControl().sendAction(#selector(URLSessionTask.suspend), to: UIApplication.shared, for: nil)
+}

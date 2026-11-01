@@ -1,0 +1,48 @@
+# XcodeGen spec: `xcodegen generate` writes AIOStreamsTV.xcodeproj from this file.
+name: AIOStreamsTV
+options:
+  bundleIdPrefix: io.github.aiostreams
+  deploymentTarget:
+    tvOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    # Set this to your Apple Developer team ID, or pick the team in Xcode.
+    DEVELOPMENT_TEAM: ""
+packages:
+  MPVKit:
+    url: https://github.com/mpvkit/MPVKit
+    exactVersion: 1.1.0-n9.0.2
+targets:
+  AIOStreamsTV:
+    type: application
+    platform: tvOS
+    sources:
+      - path: App
+        excludes:
+          - Info.plist
+          - web
+          - web/**
+      # The web app's standalone build, from scripts/fetch-web.sh.
+      - path: App/web
+        type: folder
+        buildPhase: resources
+        optional: true
+    settings:
+      base:
+        PRODUCT_NAME: AIOStreams
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.aiostreams.tvos
+        INFOPLIST_FILE: App/Info.plist
+        TARGETED_DEVICE_FAMILY: "3"
+        CODE_SIGN_STYLE: Automatic
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+    dependencies:
+      - package: MPVKit
+        product: MPVKit
+      - sdk: JavaScriptCore.framework
+      - sdk: MediaPlayer.framework
+      - sdk: AVFoundation.framework
+      - sdk: Metal.framework
+      - sdk: QuartzCore.framework

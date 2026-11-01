@@ -1,0 +1,42 @@
+# Builds the app for the tvOS simulator, unsigned, to check that it compiles.
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      aiostreams_ref:
+        description: AIOStreams branch or tag to take the web app from
+        default: main
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build the web app
+        env:
+          AIOSTREAMS_REF: ${{ inputs.aiostreams_ref || 'main' }}
+        run: |
+          corepack enable
+          bash scripts/fetch-web.sh
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build
+        run: |
+          xcodebuild build \
+            -project AIOStreamsTV.xcodeproj \
+            -scheme AIOStreamsTV \
+            -destination 'generic/platform=tvOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO
