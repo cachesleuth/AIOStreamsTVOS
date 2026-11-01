@@ -121,7 +121,8 @@ final class MainViewController: UIViewController, RemoteReceiver {
             deviceId: Identity.deviceId,
             storage: storage.json
         ))
-        web.loadURL(WebApp.startURL)
+        // `loadURL:` in Objective-C; Swift names it `load(_:)`.
+        web.load(WebApp.startURL)
     }
 
     private func showStatus(_ text: String) {
