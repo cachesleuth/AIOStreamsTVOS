@@ -1,148 +1,119 @@
 import UIKit
 
 /**
- * Turns the Siri Remote into the keys the web app reads from a TV's remote:
- * clickpad presses and swipes into arrows, Select into `GamepadA` (which the
- * page treats as Select, and holds for the item menu), Play/Pause into
- * `MediaPlayPause`. Back goes through the bridge, as on Android.
+ * The Siri Remote as the keys the web app reads from a TV's remote: the
+ * clickpad's edges and swipes as arrows (held, they repeat), Select as Enter
+ * (the page's hold actions work on a held Enter), Play/Pause as
+ * `MediaPlayPause`. Back goes through the bridge, as on Android. Held for a
+ * second, Play/Pause opens the app's own menu instead. Follows the working
+ * aiostreams-tvos project's RootViewController.
  */
-final class RemoteInput: NSObject {
-    /// Sends `keydown` or `keyup` for a key name.
-    var key: (_ type: String, _ key: String, _ repeat: Bool) -> Void = { _, _, _ in }
-    /// Play/Pause held for 2 seconds.
-    var heldPlayPause: () -> Void = {}
-    private var playPauseHold: Timer?
-    /// The Menu/Back button; false lets tvOS have it, which leaves the app.
-    var back: () -> Bool = { false }
-    /// Select on a text field; true when it opened the keyboard instead.
-    var editText: () -> Bool = { false }
+final class RemoteInput {
+    var keyDown: (_ key: String, _ repeat: Bool) -> Void = { _, _ in }
+    var keyUp: (_ key: String) -> Void = { _ in }
+    var back: () -> Void = {}
+    var menu: () -> Void = {}
 
-    private var held: [UIPress.PressType: String] = [:]
-    private var repeating: (key: String, timer: Timer)?
-    private var panStart: CGPoint = .zero
-    private var consumedSelect = false
-    private var menuTaken = false
+    private var repeatTimer: Timer?
+    private var repeating: String?
+    private var menuHold: Timer?
+    private var menuOpened = false
+    private var swipeAnchor: CGPoint = .zero
 
-    private static let repeatDelay: TimeInterval = 0.4
+    private static let menuHoldTime: TimeInterval = 1
+    private static let repeatDelay: TimeInterval = 0.45
     private static let repeatEvery: TimeInterval = 0.11
-    /// How far a swipe on the touch surface goes for each step.
-    private static let swipeStep: CGFloat = 220
+    /// How far a swipe on the touch surface goes for one step.
+    private static let swipeStepX: CGFloat = 190
+    private static let swipeStepY: CGFloat = 150
 
-    func attach(to view: UIView) {
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(onPan(_:)))
-        pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
-        view.addGestureRecognizer(pan)
-    }
+    func press(_ press: UIPress) {
+        let began = press.phase == .began
+        let ended = press.phase == .ended || press.phase == .cancelled
+        guard began || ended else { return }
 
-    /// The presses it didn't take, which go on to `super`.
-    func pressesBegan(_ presses: Set<UIPress>) -> Set<UIPress> {
-        var rest = Set<UIPress>()
-        for press in presses {
-            switch press.type {
-            case .menu:
-                menuTaken = back()
-                if !menuTaken { rest.insert(press) }
-            case .select:
-                if editText() {
-                    consumedSelect = true
-                } else {
-                    down(press.type, "GamepadA", repeats: false)
+        switch press.type {
+        case .menu:
+            if began { back() }
+        case .playPause:
+            if began {
+                menuOpened = false
+                menuHold?.invalidate()
+                menuHold = Timer.scheduledTimer(withTimeInterval: Self.menuHoldTime, repeats: false) { [weak self] _ in
+                    self?.menuOpened = true
+                    self?.menu()
                 }
-            default:
-                if press.type == .playPause {
-                    playPauseHold?.invalidate()
-                    playPauseHold = Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { [weak self] _ in
-                        self?.playPauseHold = nil
-                        self?.heldPlayPause()
-                    }
-                }
-                if let name = Self.names[press.type] {
-                    down(press.type, name, repeats: Self.arrows.contains(name))
-                } else {
-                    rest.insert(press)
-                }
-            }
-        }
-        return rest
-    }
-
-    func pressesEnded(_ presses: Set<UIPress>) -> Set<UIPress> {
-        var rest = Set<UIPress>()
-        for press in presses {
-            if press.type == .playPause {
-                playPauseHold?.invalidate()
-                playPauseHold = nil
-            }
-            if press.type == .select, consumedSelect {
-                consumedSelect = false
-            } else if let name = held.removeValue(forKey: press.type) {
-                if repeating?.key == name { stopRepeating() }
-                key("keyup", name, false)
-            } else if press.type == .menu {
-                // tvOS gets the release only when it got the press.
-                if menuTaken { menuTaken = false } else { rest.insert(press) }
             } else {
-                rest.insert(press)
+                menuHold?.invalidate()
+                menuHold = nil
+                if !menuOpened { tap("MediaPlayPause") }
+            }
+        default:
+            guard let key = Self.key(for: press.type) else { return }
+            if began {
+                keyDown(key, false)
+                if key != "Enter" { startRepeating(key) }
+            } else {
+                stopRepeating()
+                keyUp(key)
             }
         }
-        return rest
     }
 
-    private func down(_ type: UIPress.PressType, _ name: String, repeats: Bool) {
-        held[type] = name
-        key("keydown", name, false)
-        guard repeats else { return }
-        stopRepeating()
-        let start = Timer.scheduledTimer(withTimeInterval: Self.repeatDelay, repeats: false) { [weak self] _ in
-            guard let self, self.repeating?.key == name else { return }
-            let timer = Timer.scheduledTimer(withTimeInterval: Self.repeatEvery, repeats: true) { [weak self] _ in
-                self?.key("keydown", name, true)
-            }
-            self.repeating = (name, timer)
-        }
-        repeating = (name, start)
-    }
-
-    private func stopRepeating() {
-        repeating?.timer.invalidate()
-        repeating = nil
-    }
-
-    @objc private func onPan(_ pan: UIPanGestureRecognizer) {
-        guard let view = pan.view else { return }
-        let at = pan.translation(in: view)
-        switch pan.state {
+    /// Swipes on the touch surface step like the arrows.
+    func touches(_ touches: Set<UITouch>) {
+        guard let touch = touches.first else { return }
+        let at = touch.location(in: nil)
+        switch touch.phase {
         case .began:
-            panStart = at
-        case .changed:
-            let dx = at.x - panStart.x
-            let dy = at.y - panStart.y
-            let name: String?
-            if abs(dx) >= Self.swipeStep, abs(dx) > abs(dy) {
-                name = dx > 0 ? "ArrowRight" : "ArrowLeft"
-            } else if abs(dy) >= Self.swipeStep {
-                name = dy > 0 ? "ArrowDown" : "ArrowUp"
-            } else {
-                name = nil
+            swipeAnchor = at
+        case .moved:
+            let dx = at.x - swipeAnchor.x
+            let dy = at.y - swipeAnchor.y
+            if abs(dx) >= Self.swipeStepX, abs(dx) > abs(dy) {
+                tap(dx > 0 ? "ArrowRight" : "ArrowLeft")
+                swipeAnchor = at
+            } else if abs(dy) >= Self.swipeStepY, abs(dy) > abs(dx) {
+                tap(dy > 0 ? "ArrowDown" : "ArrowUp")
+                swipeAnchor = at
             }
-            guard let name else { return }
-            panStart = at
-            key("keydown", name, false)
-            key("keyup", name, false)
         default:
             break
         }
     }
 
-    private static let arrows: Set<String> = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]
+    func stopRepeating() {
+        repeatTimer?.invalidate()
+        repeatTimer = nil
+        repeating = nil
+    }
 
-    private static let names: [UIPress.PressType: String] = [
-        .upArrow: "ArrowUp",
-        .downArrow: "ArrowDown",
-        .leftArrow: "ArrowLeft",
-        .rightArrow: "ArrowRight",
-        .playPause: "MediaPlayPause",
-        .pageUp: "PageUp",
-        .pageDown: "PageDown",
-    ]
+    private func tap(_ key: String) {
+        keyDown(key, false)
+        keyUp(key)
+    }
+
+    private func startRepeating(_ key: String) {
+        stopRepeating()
+        repeating = key
+        repeatTimer = Timer.scheduledTimer(withTimeInterval: Self.repeatDelay, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.repeatTimer = Timer.scheduledTimer(withTimeInterval: Self.repeatEvery, repeats: true) { [weak self] _ in
+                if let key = self?.repeating { self?.keyDown(key, true) }
+            }
+        }
+    }
+
+    private static func key(for type: UIPress.PressType) -> String? {
+        switch type {
+        case .upArrow: return "ArrowUp"
+        case .downArrow: return "ArrowDown"
+        case .leftArrow: return "ArrowLeft"
+        case .rightArrow: return "ArrowRight"
+        case .select: return "Enter"
+        case .pageUp: return "PageUp"
+        case .pageDown: return "PageDown"
+        default: return nil
+        }
+    }
 }

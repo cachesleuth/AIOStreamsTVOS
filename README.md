@@ -5,27 +5,38 @@ signs in to any Jellyfin server) on tvOS, playing through mpv. The page draws ev
 player's controls, unchanged; this app shows it in a web view over libmpv, as the desktop and
 Android apps do, and turns the Siri Remote into the keys the page already handles.
 
-It is unofficial and experimental. It uses private tvOS APIs, so it can't go on the App Store and is
-installed from Xcode.
+It is unofficial and experimental. It uses private tvOS APIs, so it can't go on the App Store; the
+IPA is sideloaded.
 
 ## How it fits together
 
 ```
 ┌──────────────────────────── screen ────────────────────────────┐
-│  UIWebView, transparent: the web app and its player controls   │
+│  WKWebView, transparent: the web app and its player controls   │
 │        ▲  window.aiostreamsApp: JSON messages both ways        │
 │  CAMetalLayer: mpv's frames (gpu-next, Vulkan on MoltenVK)     │
 └────────────────────────────────────────────────────────────────┘
 ```
 
-- **The page** is `packages/web`'s standalone build, bundled in the app. `AppURLProtocol` serves it
-  at `http://aiostreams.localhost/`, so it has an origin of its own for sign-ins and settings, and can
-  reach plain-http servers on the local network.
-- **The web view** is tvOS's UIWebView. Apple leaves it out of the tvOS SDK but the system still ships
-  it; `LegacyWebView` makes one through the Objective-C runtime.
-- **The bridge** is the page's `window.aiostreamsApp`, which `BridgeScript` puts into `index.html`
-  ahead of the page's own scripts. Page to app goes through a function the app puts into the page's
-  JavaScript context (`JSContextHook`); app to page through `stringByEvaluatingJavaScriptFromString:`.
+The web layer follows the working aiostreams-tvos project, which loads an AIOStreams server's own
+page the same way:
+
+- **The web view** is WKWebView. tvOS ships WebKit but leaves it out of the SDK, so `AIOWebView.m`
+  loads it with `dlopen` and calls it through the Objective-C runtime.
+- **The page** is `packages/web`'s standalone build, bundled in the app as `WebBuild` and served by
+  a URL scheme handler at `aiostv://localhost/`, so it has an origin of its own for sign-ins and
+  settings.
+- **Filling the screen:** WebKit fits the page to the screen less tvOS's safe area but draws it
+  from the left edge, leaving a strip on the right. The app cancels the safe area and hands the web
+  view the whole screen to lay out in (`fillScreen`).
+- **The focus ring:** WebKit only counts the page focused while its content view is first responder,
+  and `:focus` and `:focus-visible` need that. The app makes it first responder after each load and
+  whenever its own screens close (`focusPage`).
+- **The remote:** `AppWindow` takes the remote's presses and swipes before WebKit's content view
+  can, and hands them to the page as keys through `__aioTV`.
+- **The bridge** is the page's `window.aiostreamsApp`, added by a user script at document start.
+  Page to app goes through `webkit.messageHandlers.aiostreamsNative`; app to page through
+  `evaluateJavaScript`, which never blocks the app.
 - **mpv** comes from [MPVKit](https://github.com/mpvkit/MPVKit) (the LGPL build). `MPVEngine` and
   `PlayerChannel` follow AIOStreams' Android `MpvEngine` and `PlayerChannel`: the same options,
   observed properties and messages.
@@ -42,24 +53,23 @@ Back behaviour and the bundled-player path. It also means:
 - Android-only playback settings (frame rate matching, tunnelling) show and do nothing.
 - The statistics overlay shows nothing: it needs mpv's Lua scripts, which tvOS's libmpv lacks.
 
-A `tvos` host in the web app itself would remove all of these; it's a small change there if the
-AIOStreams maintainers want one.
-
 ## The remote
 
-| Siri Remote                   | Page sees                                     |
-| ----------------------------- | --------------------------------------------- |
-| Swipe or click the clickpad's edges | Arrow keys (held edges repeat)          |
-| Select                        | Select; held, the item's menu                 |
-| Select on a text field        | tvOS's keyboard, with dictation on the mic button |
-| Back / Menu                   | Back; twice on Home leaves the app            |
-| Play/Pause                    | Play/Pause                                    |
-| Channel up/down (some remotes)| Next/previous chapter                         |
+| Siri Remote                         | Does                                              |
+| ----------------------------------- | ------------------------------------------------- |
+| Clickpad edges / swipe              | Arrow keys (held edges repeat)                    |
+| Click                               | Enter (held, the page's hold actions)             |
+| Click on a text field               | tvOS's keyboard, with dictation on the mic button |
+| Back / Menu                         | The page's Back; twice on Home leaves the app     |
+| Play/Pause                          | Play/Pause                                        |
+| **Hold Play/Pause (1 s)**           | App menu: reload, or reset the app's data         |
 
-The player's own keys apply as on any TV: left and right skip, Select shows the controls.
+## Saved data
 
-Voice: the page's own voice search needs a speech recogniser, which tvOS doesn't give apps, so it's
-off. Dictation works in any field through the system keyboard.
+tvOS can drop a web view's stored data between launches, and with it the page's sign-in. The app
+keeps a copy of the page's localStorage in its own settings (about 350,000 characters at most,
+values over 100,000 left out), puts back what is missing as the page starts, and hears of every
+change. **Reset the app's data** in the app menu clears both, then loads the page again.
 
 ## External players
 
@@ -70,8 +80,12 @@ to the page; the page saves where you stopped.
 
 ## Building
 
-Needs a Mac with Xcode 16 or later, [XcodeGen](https://github.com/yonaskolb/XcodeGen), Node 22+
-with Corepack, and an Apple TV (or the tvOS simulator).
+The GitHub Actions workflow builds an unsigned `AIOStreams.ipa` for Apple TV hardware. Every run
+attaches it as an artifact, each push to `main` replaces the **Nightly** release, and a `v*` tag
+publishes a release of its own. Sign it with your own Apple ID using a sideloading tool that
+handles Apple TV; with a free Apple ID the signature lasts 7 days, with a paid account a year.
+
+On a Mac with Xcode 16 or later, [XcodeGen](https://github.com/yonaskolb/XcodeGen) and Node 22+:
 
 ```sh
 bash scripts/fetch-web.sh       # clones AIOStreams into .build/ and builds the web app into WebBuild
@@ -81,77 +95,20 @@ open AIOStreamsTV.xcodeproj
 
 `AIOSTREAMS_DIR=/path/to/AIOStreams bash scripts/fetch-web.sh` builds from a checkout you already have
 instead, and `AIOSTREAMS_REF=<branch or tag>` picks what to clone. The script only reads that repo.
-
-In Xcode, pick your team under Signing & Capabilities (or set `DEVELOPMENT_TEAM` in `project.yml`),
-change the bundle ID if it's taken, and run on the Apple TV. A free Apple account's builds stop
-opening after 7 days; a paid account's last a year.
+Safari's Develop menu on a Mac can inspect the page.
 
 Turn off Metal API Validation (Product → Scheme → Edit Scheme → Run → Diagnostics): MoltenVK trips it
 on HDR video. See [KhronosGroup/MoltenVK#2226](https://github.com/KhronosGroup/MoltenVK/issues/2226).
-
-### Without a Mac
-
-The GitHub Actions workflow builds an unsigned `AIOStreams.ipa` for Apple TV hardware. Every run
-attaches it to the run as an artifact. Each push to `main` replaces the **Nightly** release, and
-pushing a `v*` tag (e.g. `v0.1.0`) publishes a release of its own.
-
-An Apple TV only installs apps signed for it, so the `.ipa` has to be signed with your own Apple ID
-before it installs. A sideloading tool that handles Apple TV can do that from Windows; with a free
-Apple ID the signature lasts 7 days, with a paid developer account a year.
-
-## What isn't known yet
-
-This was written without a Mac, so none of it has run. In rough order of risk:
-
-1. **UIWebView on current tvOS.** The private class worked in the [tvOS-Browser](https://github.com/Moballo-LLC/tvOS-Browser)
-   projects; whether it's still in tvOS 17 and 18 is the first thing to check. Without it there's
-   no way to show the web app on tvOS.
-2. **Speed.** UIWebView probably runs JavaScript without the JIT Safari gets. A React app this size
-   may feel slow.
-3. **The context callback.** If WebKit never calls `webView:didCreateJavaScriptContext:forFrame:`,
-   the app installs the bridge after the page loads instead; messages wait in a queue until then.
-4. **Storage.** tvOS can clear an app's caches, web storage included. The app copies localStorage
-   into the user defaults (up to about 400 KB, values over 64 KB left out) and restores missing keys
-   at start, so sign-ins and settings survive. IndexedDB caches don't, and may not exist in UIWebView.
-5. **The keyboard.** Select on a field opens a native text-entry screen over the page. The web
-   app's Android TV mode keeps focused fields read-only until Select (`src/lib/tv.ts`), so the app
-   sends the page an Enter first to unlock the field.
-6. **Scale and focus ring.** The web app lays a TV's page out 1280 wide and leaves scaling to the
-   web view, which UIWebView doesn't do reliably from the viewport alone. The app zooms the web
-   view's scroll view itself whenever the page is drawn narrower than the screen, or reports more
-   of itself on screen than it lays out; each zoom is written to the start-up log. UIWebView's
-   WebKit drops every CSS rule that names `:focus-visible`, the focus ring included, so
-   `AppURLProtocol` rewrites it to `:focus` in each `.css` file as it serves it, and the bridge
-   script does the same for `<style>` added at run time and for the page's selector calls.
-7. **Swipe sensitivity** (`RemoteInput.swipeStep`) is a guess.
-8. **MPVKit** describes itself as not production quality. HDR passthrough isn't set up.
-
-## When the page doesn't start
-
-A TV has no console, so the app keeps a log of each page start in the user defaults as it happens:
-index.html served, the start-up script running, the bridge connecting, the page drawing, and every
-error the page reports. Because it's saved as it goes, it survives an app that froze and was
-force-quit.
-
-- **Next launch:** if the last start never drew the page, the app shows that log before loading
-  anything, with **Try again**, **Reset the app's data** and **Close** (which also starts the page).
-- **This launch:** if nothing is drawn 20 seconds after the page starts loading (10 after it
-  finishes), the same screen opens over it. Holding Play/Pause for 2 seconds opens it at any time.
-
-The app never waits on the page for any of this: UIWebView runs scripts synchronously, so asking a
-stuck page anything would freeze the app with it. The page sends its status every few seconds
-instead. Resetting deletes WebKit's files and the app's copy of localStorage, and the next page start
-clears what WebKit still holds in memory before the page reads it.
 
 ## Layout
 
 | Folder         | What it holds                                                          |
 | -------------- | ---------------------------------------------------------------------- |
-| `App/Web`      | The UIWebView wrapper, the page's origin, the bridge script and hook    |
-| `App/Bridge`   | The app's end of the bridge and its JSON helpers                       |
+| `App/Web`      | The WKWebView wrapper and scheme handler, the bridge script, storage   |
+| `App/Bridge`   | JSON helpers                                                           |
 | `App/Player`   | libmpv, the player messages, Now Playing and remote commands           |
-| `App/Input`    | The Siri Remote and the system keyboard                                |
-| `App/Support`  | Identity, folders, storage mirroring, mpv.conf, the app's own answers  |
+| `App/Input`    | The window that takes the remote, and the keys it becomes              |
+| `App/Support`  | Identity, folders, mpv.conf, the app's own answers                     |
 | `scripts`      | Building the web app into `WebBuild` (git-ignored)                     |
 
 ## Licences

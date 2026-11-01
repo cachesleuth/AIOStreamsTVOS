@@ -11,8 +11,11 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
         setUpAudio()
-        let window = UIWindow(frame: UIScreen.main.bounds)
+        // Takes the remote before WebKit's content view, which is first responder.
+        let window = AppWindow(frame: UIScreen.main.bounds)
         window.rootViewController = main
+        window.remote = main
+        window.backgroundColor = .black
         window.makeKeyAndVisible()
         self.window = window
         if let url = launchOptions?[.url] as? URL { main.receiveLink(url.absoluteString) }
@@ -23,6 +26,14 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
         main.receiveLink(url.absoluteString)
         return true
+    }
+
+    func applicationWillResignActive(_ application: UIApplication) {
+        main.appWillResignActive()
+    }
+
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        main.appDidBecomeActive()
     }
 
     /// Movie playback, with as many channels as the TV's output takes.

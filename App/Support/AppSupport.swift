@@ -15,10 +15,6 @@ enum Identity {
 
     static let device = UIDevice.current.name.isEmpty ? "Apple TV" : UIDevice.current.name
 
-    static var script: BridgeScript.Identity {
-        BridgeScript.Identity(version: version, device: device, deviceId: deviceId)
-    }
-
     /// Ends in "iPad" so the web app offers the iOS players (Infuse, VLC) for external playback.
     static var userAgent: String {
         let os = UIDevice.current.systemVersion.replacingOccurrences(of: ".", with: "_")
@@ -37,54 +33,6 @@ enum AppFolders {
         for folder in [mpv, shaders, subtitles] {
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         }
-    }
-}
-
-/**
- * A copy of the page's localStorage in the user defaults, which tvOS keeps
- * when it clears caches. The defaults are small on tvOS, so large values
- * (cached pages rather than settings and sign-ins) are left out.
- */
-enum WebStorageMirror {
-    private static let key = "aiostreams.webStorage"
-    private static let maxValue = 64 * 1024
-    private static let maxTotal = 400 * 1024
-
-    static func load() -> [String: String] {
-        UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
-    }
-
-    static func clear() {
-        UserDefaults.standard.removeObject(forKey: key)
-    }
-
-    private static let clearKey = "aiostreams.clearWebStorage"
-
-    /// The next page start clears its storage first.
-    static func requestClear() {
-        UserDefaults.standard.set(true, forKey: clearKey)
-    }
-
-    /// Whether a clear was asked for, which only one page start acts on.
-    static func takeClearRequest() -> Bool {
-        let asked = UserDefaults.standard.bool(forKey: clearKey)
-        if asked { UserDefaults.standard.removeObject(forKey: clearKey) }
-        return asked
-    }
-
-    static func save(_ items: Message) {
-        var kept: [String: String] = [:]
-        var total = 0
-        let small = items.compactMap { key, value -> (String, String)? in
-            guard let text = value as? String, text.utf8.count <= maxValue else { return nil }
-            return (key, text)
-        }.sorted { $0.1.utf8.count < $1.1.utf8.count }
-        for (key, text) in small {
-            total += key.utf8.count + text.utf8.count
-            if total > maxTotal { break }
-            kept[key] = text
-        }
-        UserDefaults.standard.set(kept, forKey: key)
     }
 }
 

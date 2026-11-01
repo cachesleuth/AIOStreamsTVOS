@@ -35,12 +35,16 @@ targets:
         INFOPLIST_FILE: App/Info.plist
         TARGETED_DEVICE_FAMILY: "3"
         CODE_SIGN_STYLE: Automatic
-        MARKETING_VERSION: "0.1.0"
+        MARKETING_VERSION: "0.2.0"
         CURRENT_PROJECT_VERSION: "1"
+        # The WKWebView wrapper is Objective-C, as WebKit is only reached through the runtime.
+        SWIFT_OBJC_BRIDGING_HEADER: App/AIOStreamsTV-Bridging-Header.h
+        CLANG_ENABLE_OBJC_ARC: YES
+        # WebKit is loaded at runtime; nothing links against it.
+        GCC_WARN_UNDECLARED_SELECTOR: NO
     dependencies:
       - package: MPVKit
         product: MPVKit
-      - sdk: JavaScriptCore.framework
       - sdk: MediaPlayer.framework
       - sdk: AVFoundation.framework
       - sdk: Metal.framework
