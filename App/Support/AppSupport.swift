@@ -54,6 +54,10 @@ enum WebStorageMirror {
         UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
     }
 
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+
     static func save(_ items: Message) {
         var kept: [String: String] = [:]
         var total = 0

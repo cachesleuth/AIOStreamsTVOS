@@ -15,6 +15,13 @@ final class MainViewController: UIViewController {
     /// `aiostreams://` links, held until the page listens for them.
     private var links: [String] = []
     private var linksReady = false
+    /// What failed outside the page since it last started loading.
+    private var nativeErrors: [String] = []
+    /// Counts page loads, so a check scheduled for an older one does nothing.
+    private var loadGeneration = 0
+    /// How long the page has to draw something before the error screen shows.
+    private static let startTimeout: TimeInterval = 20
+    private static let afterLoadTimeout: TimeInterval = 10
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -54,8 +61,55 @@ final class MainViewController: UIViewController {
         guard AppURLProtocol.webRoot != nil else {
             return showProblem("The web app is missing from this build. Run scripts/fetch-web.sh, then build again.")
         }
+        startPage()
+    }
+
+    /// Loads the web app from the start, and checks that it draws.
+    private func startPage() {
+        guard let web else { return }
+        loadGeneration += 1
+        nativeErrors.removeAll()
+        linksReady = false
         bridge.pageStarted()
         web.load(AppURLProtocol.startURL)
+        checkPage(after: Self.startTimeout)
+    }
+
+    private func checkPage(after delay: TimeInterval) {
+        let generation = loadGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.loadGeneration == generation else { return }
+            let (status, _) = self.pageStatus()
+            if status?.rendered != true { self.showDiagnostics(title: "The app could not start") }
+        }
+    }
+
+    private func pageStatus() -> (PageStatus?, String?) {
+        let raw = web?.evaluate("window.__aiostreamsStatus ? __aiostreamsStatus() : ''")
+        let status = raw.flatMap { try? JSONDecoder().decode(PageStatus.self, from: Data($0.utf8)) }
+        return (status, raw)
+    }
+
+    /// The error screen, shown when the page doesn't start, or on a long Play/Pause.
+    private func showDiagnostics(title: String) {
+        guard presentedViewController == nil else { return }
+        // Shown once per load; Try again starts a new one.
+        loadGeneration += 1
+        let (status, raw) = pageStatus()
+        let report = Diagnostics.report(status: status, rawStatus: raw, nativeErrors: nativeErrors)
+        NSLog("[app] %@\n%@", title, report)
+        let screen = DiagnosticsViewController(title: title, report: report)
+        screen.onRetry = { [weak self] in self?.startPage() }
+        screen.onReset = { [weak self] in
+            guard let self else { return }
+            Diagnostics.resetWebData(web: self.web)
+            self.startPage()
+        }
+        present(screen, animated: true)
+    }
+
+    @objc private func heldPlayPause(_ press: UILongPressGestureRecognizer) {
+        if press.state == .began { showDiagnostics(title: "Diagnostics") }
     }
 
     override func viewDidLayoutSubviews() {
@@ -97,7 +151,8 @@ final class MainViewController: UIViewController {
         web.view.backgroundColor = .clear
         // The remote's touches go to RemoteInput, not to taps in the page.
         web.view.isUserInteractionEnabled = false
-        web.set("scalesPageToFit", false)
+        // The page asks for a 1280-wide layout on a TV, scaled up to the screen.
+        web.set("scalesPageToFit", true)
         web.set("mediaPlaybackRequiresUserAction", false)
         web.set("allowsInlineMediaPlayback", true)
         if let scroll = web.scrollView {
@@ -113,6 +168,7 @@ final class MainViewController: UIViewController {
         }
         webDelegate.didFinish = { [weak self] in
             guard let self, let web = self.web else { return }
+            self.checkPage(after: Self.afterLoadTimeout)
             // Where WebKit never sent the context callback, the page gets its function now.
             self.bridge.pageLoaded {
                 if let context = web.javaScriptContext,
@@ -121,8 +177,13 @@ final class MainViewController: UIViewController {
                 }
             }
         }
-        webDelegate.didFail = { error in
+        webDelegate.didFail = { [weak self] error in
             NSLog("[web] load failed: %@", error.localizedDescription)
+            // A load the page itself replaced or stopped isn't a failure.
+            guard error.domain != NSURLErrorDomain || error.code != NSURLErrorCancelled else { return }
+            let address = (error.userInfo[NSURLErrorFailingURLStringErrorKey] as? String).map { " (\($0))" } ?? ""
+            self?.nativeErrors.append("Load failed: \(error.localizedDescription)\(address)")
+            self?.checkPage(after: 1)
         }
         web.setDelegate(webDelegate)
         view.addSubview(web.view)
@@ -147,6 +208,12 @@ final class MainViewController: UIViewController {
             return true
         }
         input.attach(to: view)
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(heldPlayPause(_:)))
+        hold.allowedPressTypes = [NSNumber(value: UIPress.PressType.playPause.rawValue)]
+        hold.allowedTouchTypes = []
+        hold.minimumPressDuration = 2
+        hold.cancelsTouchesInView = false
+        view.addGestureRecognizer(hold)
 
         keyboard.write = { [weak self] text in
             guard let literal = JSON.string([text]) else { return }

@@ -29,6 +29,11 @@ enum BridgeScript {
     private static let template = #"""
 (function () {
   if (window.top !== window || window.aiostreamsApp) return;
+  var errorLog = [];
+  function logError(text) {
+    errorLog.push(String(text).slice(0, 1500));
+    if (errorLog.length > 15) errorLog.shift();
+  }
   var identity = __IDENTITY__;
   var saved = __STORAGE__;
   var listeners = [];
@@ -117,6 +122,81 @@ enum BridgeScript {
     if (el) el.removeAttribute('data-tvos-editing');
   };
 
+  // The web app lays a TV's page out at a fixed width (1280) for the web view
+  // to scale up to the screen. This one is told the scale outright.
+  function fitViewport(meta) {
+    if (!meta || (meta.getAttribute('name') || '').toLowerCase() !== 'viewport') return;
+    var content = meta.getAttribute('content') || '';
+    var width = /(?:^|[,\s])width=(\d+)/.exec(content);
+    if (!width || /initial-scale/.test(content)) return;
+    var scale = Math.round(((window.screen && screen.width) || 1920) / Number(width[1]) * 1000) / 1000;
+    meta.setAttribute('content', content + ', initial-scale=' + scale +
+      ', minimum-scale=' + scale + ', maximum-scale=' + scale + ', user-scalable=no');
+  }
+
+  // The page rings what has focus with :focus-visible, which WebKit only
+  // applies after a real key press, and the remote's keys come from script.
+  // With no pointer here, any focus is a remote's, so it reads as :focus.
+  // Not an escaped `\:focus-visible`, which is part of a class name such as Tailwind's.
+  var FOCUS_VISIBLE = /(^|[^\\]):focus-visible/g;
+  function plainFocus(selector) {
+    return typeof selector === 'string' && selector.indexOf(':focus-visible') >= 0
+      ? selector.replace(FOCUS_VISIBLE, '$1:focus') : selector;
+  }
+  ['matches', 'webkitMatchesSelector', 'closest', 'querySelector', 'querySelectorAll'].forEach(function (name) {
+    [Element.prototype, Document.prototype, DocumentFragment.prototype].forEach(function (proto) {
+      var own = Object.prototype.hasOwnProperty.call(proto, name) && proto[name];
+      if (typeof own !== 'function') return;
+      proto[name] = function (selector) {
+        return own.apply(this, [plainFocus(selector)].concat([].slice.call(arguments, 1)));
+      };
+    });
+  });
+  function plainFocusRules(rules) {
+    if (!rules) return;
+    for (var i = 0; i < rules.length; i++) {
+      var rule = rules[i];
+      if (rule.selectorText && rule.selectorText.indexOf(':focus-visible') >= 0) {
+        try { rule.selectorText = plainFocus(rule.selectorText); } catch (e) {}
+      }
+      if (rule.cssRules) plainFocusRules(rule.cssRules);
+    }
+  }
+  var sheetsTimer = 0;
+  function plainFocusSheets() {
+    clearTimeout(sheetsTimer);
+    sheetsTimer = setTimeout(function () {
+      for (var i = 0; i < document.styleSheets.length; i++) {
+        try { plainFocusRules(document.styleSheets[i].cssRules); } catch (e) {}
+      }
+    }, 0);
+  }
+
+  new MutationObserver(function (changes) {
+    var sheets = false;
+    for (var i = 0; i < changes.length; i++) {
+      var change = changes[i];
+      if (change.type === 'attributes') {
+        if (change.target.tagName === 'META') fitViewport(change.target);
+        continue;
+      }
+      for (var j = 0; j < change.addedNodes.length; j++) {
+        var node = change.addedNodes[j];
+        if (node.tagName === 'META') fitViewport(node);
+        else if (node.tagName === 'STYLE' || node.tagName === 'LINK') sheets = true;
+      }
+    }
+    if (sheets) plainFocusSheets();
+  }).observe(document.documentElement, {
+    subtree: true, childList: true, attributes: true, attributeFilter: ['content']
+  });
+  // A stylesheet's rules are readable once it loads.
+  document.addEventListener('load', function (e) {
+    if (e.target && e.target.tagName === 'LINK') plainFocusSheets();
+  }, true);
+  document.addEventListener('DOMContentLoaded', plainFocusSheets);
+  window.addEventListener('load', plainFocusSheets);
+
   // tvOS may clear a web view's storage with the caches, so the app keeps a
   // copy of localStorage and puts back what is missing before the page starts.
   try {
@@ -152,13 +232,45 @@ enum BridgeScript {
     proto.clear = function () { var r = clear.apply(this, arguments); changed(this); return r; };
   } catch (e) {}
 
+  // A TV has no console, so what goes wrong is kept for the app's own error screen.
+  function reportError(text) {
+    logError(text);
+    post({ type: 'web-error', message: text });
+  }
   window.addEventListener('error', function (e) {
-    post({ type: 'web-error', message: String(e.message) + ' ' + (e.filename || '') + ':' + (e.lineno || 0) });
-  });
+    var el = e.target;
+    if (el && (el.tagName === 'SCRIPT' || el.tagName === 'LINK')) {
+      reportError('Could not load ' + (el.src || el.href));
+    } else if (e.message) {
+      reportError(String(e.message) + (e.filename ? '\n  at ' + e.filename + ':' + e.lineno + ':' + e.colno : '') +
+        (e.error && e.error.stack ? '\n' + e.error.stack : ''));
+    }
+  }, true);
   window.addEventListener('unhandledrejection', function (e) {
     var reason = e.reason;
-    post({ type: 'web-error', message: String((reason && (reason.stack || reason.message)) || reason) });
+    reportError('Unhandled rejection: ' + String((reason && (reason.stack || reason.message)) || reason));
   });
+  var consoleError = console.error;
+  console.error = function () {
+    try {
+      logError([].map.call(arguments, function (a) {
+        return a && a.stack ? a.stack : typeof a === 'object' ? JSON.stringify(a) : String(a);
+      }).join(' '));
+    } catch (e) {}
+    return consoleError.apply(console, arguments);
+  };
+  // Read by the app directly, so it works even when the bridge never connected.
+  window.__aiostreamsStatus = function () {
+    var root = document.getElementById('root');
+    return JSON.stringify({
+      href: location.href,
+      readyState: document.readyState,
+      rendered: !!root && root.childNodes.length > 0,
+      bridge: !!window.__aiostreamsPost,
+      storageKeys: (function () { try { return localStorage.length; } catch (e) { return -1; } })(),
+      errors: errorLog
+    });
+  };
 
   // The Android app's bridge, as the web app reads it: `tv` gets the TV layout.
   window.aiostreamsApp = Object.freeze({

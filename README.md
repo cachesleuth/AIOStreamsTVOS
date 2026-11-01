@@ -116,8 +116,21 @@ This was written without a Mac, so none of it has run. In rough order of risk:
 5. **The keyboard.** Select on a field opens a native text-entry screen over the page. The web
    app's Android TV mode keeps focused fields read-only until Select (`src/lib/tv.ts`), so the app
    sends the page an Enter first to unlock the field.
-6. **Swipe sensitivity** (`RemoteInput.swipeStep`) is a guess.
-7. **MPVKit** describes itself as not production quality. HDR passthrough isn't set up.
+6. **Scale and focus ring.** The web app lays a TV's page out 1280 wide; the app scales it to the
+   screen (`scalesPageToFit`, plus a fixed scale added to the page's viewport). WebKit shows
+   `:focus-visible` only after real key presses, and the remote's keys come from script, so the
+   bridge script rewrites `:focus-visible` to `:focus` in the page's stylesheets and selector calls.
+7. **Swipe sensitivity** (`RemoteInput.swipeStep`) is a guess.
+8. **MPVKit** describes itself as not production quality. HDR passthrough isn't set up.
+
+## When the page doesn't start
+
+A TV has no console, so the app keeps the page's errors itself. If the page hasn't drawn anything
+20 seconds after it starts loading (10 after it finishes), an error screen shows the app and web
+app versions, the page's state and its last errors, with **Try again** and **Reset the app's data**.
+Holding Play/Pause for 2 seconds opens the same screen at any time. Resetting clears the page's
+localStorage, IndexedDB and WebKit files, and the app's own copy of localStorage, which would
+otherwise put it back.
 
 ## Layout
 
