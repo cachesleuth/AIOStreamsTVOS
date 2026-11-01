@@ -74,7 +74,7 @@ Back behaviour and the bundled-player path. It also means:
 | ----------------------------------- | ------------------------------------------------- |
 | Clickpad edges / swipe              | Arrow keys (held edges repeat)                    |
 | Click                               | Enter (held, the page's hold actions)             |
-| Click on a text field               | tvOS's keyboard, with dictation on the mic button |
+| Click on a text field               | tvOS's search keyboard over the page, typing straight into the field (dictation on the mic button); Menu or moving down closes it. Passwords and PINs get the keyboard in an alert |
 | Back / Menu                         | The page's Back; twice on Home leaves the app     |
 | Play/Pause                          | Play/Pause                                        |
 | **Hold Play/Pause (1 s)**           | App menu: reload, or reset the app's data         |

@@ -260,9 +260,38 @@ final class MainViewController: UIViewController, RemoteReceiver {
         present(confirm, animated: true)
     }
 
-    /// tvOS has no keyboard for a web page, so a field the page asks for opens the system's, with dictation.
+    /**
+     * tvOS has no keyboard for a web page, so a field the page asks for opens
+     * the system's, with dictation. Most fields get the search keyboard over
+     * the page, typing straight into the field; passwords and PINs get the
+     * alert, which keeps them hidden and sends a PIN's form on Done.
+     */
     private func showKeyboard(_ message: Message) {
         guard presentedViewController == nil else { return }
+        if message.flag("secure") == true || message.flag("numeric") == true { return showKeyboardAlert(message) }
+        let keyboard = SearchKeyboard(
+            text: message.text("value") ?? "",
+            prompt: message.text("label") ?? "",
+            keyboardType: message.flag("email") == true ? .emailAddress : message.flag("url") == true ? .URL : .default,
+            onChange: { [weak self] text in
+                guard let self else { return }
+                self.callTV("input(\(self.jsString(text)))")
+            },
+            onClose: { [weak self] submit in
+                guard let self else { return }
+                self.keyboard = nil
+                self.callTV("done(\(submit))")
+                self.web?.focusPage()
+            }
+        )
+        self.keyboard = keyboard
+        present(keyboard.controller, animated: true)
+    }
+
+    /// The keyboard open over the page, kept until it closes.
+    private var keyboard: SearchKeyboard?
+
+    private func showKeyboardAlert(_ message: Message) {
         let label = message.text("label") ?? ""
         let alert = UIAlertController(title: label.isEmpty ? "Enter text" : label, message: nil, preferredStyle: .alert)
         alert.addTextField { field in

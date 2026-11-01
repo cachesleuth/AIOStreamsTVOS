@@ -130,6 +130,15 @@ enum BridgeScript {
     (el.tagName === 'TEXTAREA' ||
       (el.tagName === 'INPUT' && !NOT_TEXT.has((el.type || 'text').toLowerCase())));
   const target = () => document.activeElement || document.body;
+  // React tracks the value it last set, so set it as the browser would.
+  const setValue = (el, value) => {
+    const proto =
+      el.tagName === 'TEXTAREA'
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, value);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  };
   let editing = null;
   let swallowed = false;
 
@@ -181,18 +190,18 @@ enum BridgeScript {
         }
         key('keyup', name);
       },
-      /** The text typed on the app's keyboard, for the field it was opened for. */
-      type(value, submit) {
+      /** Each change on the app's search keyboard, into the field it was opened for. */
+      input(value) {
+        const el = editing;
+        if (el && el.isConnected) setValue(el, value);
+      },
+      /** The app's keyboard closed; with `submit`, the field's form is sent. */
+      done(submit) {
         const el = editing;
         editing = null;
+        // The Enter that opened the keyboard was let go over it, out of the page's sight.
+        swallowed = false;
         if (!el || !el.isConnected) return;
-        const proto =
-          el.tagName === 'TEXTAREA'
-            ? HTMLTextAreaElement.prototype
-            : HTMLInputElement.prototype;
-        // React tracks the value it last set, so set it as the browser would.
-        Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, value);
-        el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
         el.focus();
         // After React has taken the new value.
@@ -202,6 +211,12 @@ enum BridgeScript {
             if (form.requestSubmit) form.requestSubmit();
             else form.submit();
           }, 250);
+      },
+      /** The text typed on the app's alert keyboard, all at once. */
+      type(value, submit) {
+        const el = editing;
+        if (el && el.isConnected) setValue(el, value);
+        this.done(submit);
       },
     }),
   });
