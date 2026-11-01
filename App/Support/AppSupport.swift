@@ -154,7 +154,7 @@ enum AppAnswers {
             "tvOS \(UIDevice.current.systemVersion), \(UIDevice.current.model)",
             "mpv: \(engine?.property("mpv-version") ?? "not started")",
             "FFmpeg: \(engine?.property("ffmpeg-version") ?? "unknown")",
-        ] + videoLines(video, window: window) + MemoryLog.report + [
+        ] + videoLines(video, window: window) + MemoryLog.report + TopShelf.report + [
             "Web app: \(web ?? "unknown")",
             "Server: \(server ?? "none")",
         ]

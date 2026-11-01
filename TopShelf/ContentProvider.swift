@@ -13,6 +13,7 @@ final class ContentProvider: TVTopShelfContentProvider {
             section("Continue Watching", items.filter(\.resumes)),
             section("Next Up", items.filter { !$0.resumes }),
         ].compactMap { $0 }
+        TopShelfStore.noteAsked(shown: sections.reduce(0) { $0 + $1.items.count })
         completionHandler(sections.isEmpty ? nil : TVTopShelfSectionedContent(sections: sections))
     }
 

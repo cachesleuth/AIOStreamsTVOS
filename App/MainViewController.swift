@@ -279,7 +279,8 @@ final class MainViewController: UIViewController, RemoteReceiver {
         let menu = UIAlertController(
             title: "AIOStreams",
             message: "App \(Identity.version) · web app \(WebApp.commit) · \(storage.keyCount) saved keys\n\n"
-                + (AppAnswers.videoLines(video, window: view.window) + MemoryLog.report).joined(separator: "\n"),
+                + (AppAnswers.videoLines(video, window: view.window) + MemoryLog.report + TopShelf.report)
+                    .joined(separator: "\n"),
             preferredStyle: .actionSheet
         )
         menu.addAction(UIAlertAction(title: "Reload", style: .default) { [weak self] _ in

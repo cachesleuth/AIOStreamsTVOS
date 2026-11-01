@@ -59,9 +59,11 @@ enum TopShelfStore {
     /// The Top Shelf's artwork width, in pixels: 548 points at 2x.
     static let imageWidth = 1096
 
+    /// The App Groups this process was signed with, for the app menu.
+    static let entitled = entitledGroups()
+
     static let group: String = {
-        let groups = entitledGroups()
-        return groups.first { $0.lowercased().contains("aiostreams") } ?? groups.first ?? declaredGroup
+        entitled.first { $0.lowercased().contains("aiostreams") } ?? entitled.first ?? declaredGroup
     }()
 
     static var folder: URL? {
@@ -87,6 +89,25 @@ enum TopShelfStore {
             NSLog("[top-shelf] saving the list: %@", error.localizedDescription)
             return false
         }
+    }
+
+    private static var askedFile: URL? { folder?.appendingPathComponent("asked.txt") }
+
+    /// The extension notes when tvOS asked it for the Top Shelf, and what it showed.
+    static func noteAsked(shown: Int) {
+        guard let folder, let file = askedFile else { return }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let line = "\(ISO8601DateFormatter().string(from: Date())) \(shown)"
+        try? line.write(to: file, atomically: true, encoding: .utf8)
+    }
+
+    /// When tvOS last asked the extension, and how many titles it showed then.
+    static func lastAsked() -> (date: Date, shown: Int)? {
+        guard let file = askedFile, let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+        let parts = text.split(separator: " ")
+        guard parts.count == 2, let date = ISO8601DateFormatter().date(from: String(parts[0])),
+              let shown = Int(parts[1]) else { return nil }
+        return (date, shown)
     }
 
     /// The page asks Jellyfin for artwork 400 wide, for its own row; the Top Shelf draws it wider.
