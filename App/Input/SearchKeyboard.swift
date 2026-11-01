@@ -86,7 +86,8 @@ private final class Container: UISearchContainerViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        backdrop.backgroundColor = .systemBackground
+        // tvOS has no systemBackground; the app's dark style is black.
+        backdrop.backgroundColor = .black
         backdrop.isUserInteractionEnabled = false
         view.insertSubview(backdrop, at: 0)
     }
