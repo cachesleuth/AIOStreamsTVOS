@@ -216,7 +216,8 @@ final class MPVEngine {
             // The user's mpv.conf may size the cache instead.
             let config = (try? String(contentsOf: configFile, encoding: .utf8)) ?? ""
             if !config.contains("demuxer-max-bytes") {
-                let budget = (settings.cacheMb > 0 ? settings.cacheMb : Self.defaultCacheMb) << 20
+                // The page offers up to 1 GB, more than a TV can hold beside the web page.
+                let budget = min(settings.cacheMb > 0 ? settings.cacheMb : Self.defaultCacheMb, Self.maxCacheMb) << 20
                 set("demuxer-max-bytes", String(budget - budget / 4))
                 set("demuxer-max-back-bytes", String(budget / 4))
             }
@@ -418,6 +419,8 @@ final class MPVEngine {
     // MARK: Helpers
 
     private static let defaultCacheMb = 150
+    /// As the working aiostreams-tvos project caps it.
+    private static let maxCacheMb = 400
     private static let pictureCodecs: Set<String> = ["hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"]
 
     private static let observed: [(String, mpv_format)] = [

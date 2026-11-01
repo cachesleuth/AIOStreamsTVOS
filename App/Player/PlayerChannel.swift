@@ -30,6 +30,9 @@ final class PlayerChannel: MPVEngineListener {
 
     var paused: Bool { state.flag("paused") != false }
 
+    /// A file is loaded, playing or paused.
+    var playing: Bool { loaded }
+
     func change(_ change: Change) {
         engine.change(change)
     }

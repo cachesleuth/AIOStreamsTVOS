@@ -1,3 +1,4 @@
+import os
 import UIKit
 
 /// Who the app is to the page and to Jellyfin servers.
@@ -65,6 +66,57 @@ enum MPVConfig {
     }
 }
 
+/**
+ * When the page's web process ended and what memory looked like then, to see
+ * whether it runs out while browsing or while a video plays. The web process
+ * is WebKit's own, so only the app's side can be measured here.
+ */
+enum MemoryLog {
+    private(set) static var lines: [String] = []
+    private(set) static var pageEnds = 0
+
+    /// This app's own memory, as tvOS counts it against the app's limit.
+    static var appMB: Int? {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let status = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return status == KERN_SUCCESS ? Int(info.phys_footprint >> 20) : nil
+    }
+
+    /// What the app may still take before tvOS ends it.
+    static var leftMB: Int { Int(os_proc_available_memory() >> 20) }
+
+    static var now: String {
+        "app \(appMB.map { "\($0) MB" } ?? "?"), \(leftMB) MB left"
+    }
+
+    static func pageEnded(playing: Bool) {
+        pageEnds += 1
+        note("page's web process ended \(playing ? "with a video loaded" : "while browsing")")
+    }
+
+    static func warning(playing: Bool) {
+        note("memory warning \(playing ? "with a video loaded" : "while browsing")")
+    }
+
+    private static func note(_ what: String) {
+        let time = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+        let line = "\(time): \(what); \(now)"
+        NSLog("[memory] %@", line)
+        lines.append(line)
+        if lines.count > 6 { lines.removeFirst(lines.count - 6) }
+    }
+
+    /// For the app menu and the diagnostics.
+    static var report: [String] {
+        ["Memory: \(now); the page reloaded \(pageEnds) times since launch"] + lines
+    }
+}
+
 /// Answers to the page's requests about the app itself.
 enum AppAnswers {
     static func appInfo(engine: MPVEngine?) -> Message {
@@ -102,7 +154,7 @@ enum AppAnswers {
             "tvOS \(UIDevice.current.systemVersion), \(UIDevice.current.model)",
             "mpv: \(engine?.property("mpv-version") ?? "not started")",
             "FFmpeg: \(engine?.property("ffmpeg-version") ?? "unknown")",
-        ] + videoLines(video, window: window) + [
+        ] + videoLines(video, window: window) + MemoryLog.report + [
             "Web app: \(web ?? "unknown")",
             "Server: \(server ?? "none")",
         ]
