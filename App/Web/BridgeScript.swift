@@ -38,6 +38,16 @@ enum BridgeScript {
   try {
     delete window.OffscreenCanvas;
   } catch {}
+  /*
+   * The page asks for artwork at devicePixelRatio times its size, and tvOS
+   * reports 2 on a 4K TV, so each backdrop comes as a 3840-wide picture,
+   * 33 MB once decoded. A page of rows and backdrops then runs WebKit's
+   * process out of memory while browsing. At 1 it takes the 1080p sizes, a
+   * quarter of the memory; tvOS's own apps draw artwork at that size too.
+   */
+  try {
+    Object.defineProperty(window, 'devicePixelRatio', { get: () => 1, configurable: true });
+  } catch {}
   // The page's saved copies of artwork come back as blob URLs too.
   try {
     localStorage.setItem('aiostreams-web-cache-artwork', 'false');

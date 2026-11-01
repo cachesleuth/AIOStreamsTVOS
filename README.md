@@ -56,6 +56,13 @@ page the same way:
 - Subtitles are drawn by libass with the bundled Noto Sans (SIL Open Font License), as libass can't
   open tvOS's own fonts.
 
+### Artwork size
+
+The page asks for artwork at its device pixel ratio, which tvOS reports as 2 on a 4K TV, and
+4K-wide backdrops ran WebKit's process out of memory while browsing. The bridge script reports a
+ratio of 1, so artwork comes at 1080p sizes, as tvOS's own apps draw it. The app menu (hold
+Play/Pause) shows the app's memory and when the page last reloaded.
+
 ### Posing as the Android TV app
 
 The web app picks its behaviour from the bridge's `platform`, and only knows `android`, `windows`,
