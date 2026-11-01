@@ -62,6 +62,25 @@ YouTube trailers play in mpv. The app asks YouTube's player API for the video's 
 AIOStreams' desktop and Android apps do (`App/Player/YouTube.swift`). Where YouTube gives none,
 the page opens the trailer's link, which goes to the YouTube app if it's installed.
 
+### Top Shelf
+
+With the app in the top row of the home screen, the Top Shelf shows **Continue Watching** and
+**Next Up** from your Jellyfin server. The page already builds this list for Android TV's Watch Next
+row (the home page's resume points and next episodes, 10 at most) and sends it as a `watch-next`
+message whenever it changes, and an empty one on sign-out. The app saves it in an App Group
+container it shares with its Top Shelf extension (`TopShelf/`), and tells tvOS to ask the extension
+again.
+
+- Selecting a title opens its page in the app (`aiostreams://item/…`); Play plays it, from where it
+  stopped (`aiostreams://play/…`).
+- The list is as of the app's last run: the page asks the server again a couple of seconds after
+  the app leaves the screen, and the app stays awake that long.
+- With nothing to show, tvOS shows the Top Shelf image instead.
+- The App Group is `group.io.github.aiostreams.tvos`. The CI build ad-hoc signs the app and the
+  extension with it, so a sideloading tool can carry it over when it re-signs; some rename the
+  group, and both sides read the name from their own entitlements. If the Top Shelf stays on the
+  image, the signing dropped the group: the app's log says `[top-shelf] no App Group container`.
+
 ### Artwork size
 
 The page asks for artwork at its device pixel ratio, which tvOS reports as 2 on a 4K TV, and
@@ -140,7 +159,9 @@ Safari's Develop menu on a Mac can inspect the page.
 | `App/Bridge`   | JSON helpers                                                           |
 | `App/Player`   | libmpv, the player messages, Now Playing and remote commands           |
 | `App/Input`    | The window that takes the remote, and the keys it becomes              |
-| `App/Support`  | Identity, folders, mpv.conf, the app's own answers                     |
+| `App/Support`  | Identity, folders, mpv.conf, the app's own answers, the Top Shelf list |
+| `TopShelf`     | The Top Shelf extension: Continue Watching and Next Up                 |
+| `Shared`       | What the app and the extension both read: the saved list               |
 | `scripts`      | Building the web app into `WebBuild` (git-ignored)                     |
 
 ## Licences

@@ -65,6 +65,14 @@ jobs:
         run: |
           app="build/Build/Products/Release-appletvos/AIOStreams.app"
           test -d "$app" || { echo "No app at $app"; ls -R build/Build/Products; exit 1; }
+          shelf="$app/PlugIns/AIOStreamsTopShelf.appex"
+          test -d "$shelf" || { echo "No Top Shelf extension at $shelf"; exit 1; }
+          # An ad-hoc signature carrying the App Group the app and its Top Shelf share,
+          # which sideloading tools read when they re-sign. Inside out: the extension first.
+          codesign --force --sign - --timestamp=none --entitlements TopShelf/TopShelf.entitlements "$shelf"
+          codesign --force --sign - --timestamp=none --entitlements App/AIOStreamsTV.entitlements "$app"
+          codesign -d --entitlements - "$app"
+          codesign -d --entitlements - "$shelf"
           rm -rf Payload AIOStreams.ipa
           mkdir Payload
           cp -R "$app" Payload/

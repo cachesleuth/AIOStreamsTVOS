@@ -425,6 +425,9 @@ final class MainViewController: UIViewController, RemoteReceiver {
             leaveApp()
         case "tvos-storage":
             storage.apply(message)
+        case "watch-next":
+            // Continue Watching and Next Up, for the Top Shelf.
+            TopShelf.publish(message)
         case "tvos-keyboard":
             showKeyboard(message)
         case "mpv-config":
@@ -459,7 +462,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
         case "web-error":
             NSLog("[page] %@", message.text("message") ?? "")
         default:
-            // Downloads, watch-next, keyboard completions and the like have no Apple TV part.
+            // Downloads, keyboard completions and the like have no Apple TV part.
             break
         }
     }

@@ -10,6 +10,9 @@ settings:
     SWIFT_VERSION: "5.0"
     # Set this to your Apple Developer team ID, or pick the team in Xcode.
     DEVELOPMENT_TEAM: ""
+    # Shared by the app and its Top Shelf extension, which have to match.
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "1"
 targets:
   AIOStreamsTV:
     type: application
@@ -18,7 +21,10 @@ targets:
       - path: App
         excludes:
           - Info.plist
+          - AIOStreamsTV.entitlements
           - Fonts
+      # What the app and the Top Shelf extension both read.
+      - path: Shared
       # A folder in the app, for libass to read the subtitle font from.
       - path: App/Fonts
         type: folder
@@ -34,12 +40,12 @@ targets:
         PRODUCT_NAME: AIOStreams
         PRODUCT_BUNDLE_IDENTIFIER: io.github.aiostreams.tvos
         INFOPLIST_FILE: App/Info.plist
+        # The App Group the Top Shelf extension reads Continue Watching and Next Up from.
+        CODE_SIGN_ENTITLEMENTS: App/AIOStreamsTV.entitlements
         # The home screen icon and Top Shelf image, from App/Assets.xcassets.
         ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
         TARGETED_DEVICE_FAMILY: "3"
         CODE_SIGN_STYLE: Automatic
-        MARKETING_VERSION: "0.2.0"
-        CURRENT_PROJECT_VERSION: "1"
         # The WKWebView wrapper is Objective-C, as WebKit is only reached through the runtime.
         SWIFT_OBJC_BRIDGING_HEADER: App/AIOStreamsTV-Bridging-Header.h
         CLANG_ENABLE_OBJC_ARC: YES
@@ -48,6 +54,10 @@ targets:
         # MPVKit is one static library; this keeps its Objective-C (vo_avfoundation) linked in.
         OTHER_LDFLAGS: ["$(inherited)", "-ObjC"]
     dependencies:
+      # Continue Watching and Next Up on the home screen, embedded in PlugIns.
+      - target: AIOStreamsTopShelf
+        embed: true
+      - sdk: TVServices.framework
       # Streamyfin's MPVKit, with vo_avfoundation for HDR; from scripts/fetch-mpvkit.sh.
       - framework: Vendor/MPVKit.xcframework
         embed: false
@@ -70,3 +80,25 @@ targets:
       - sdk: libresolv.tbd
       - sdk: libxml2.tbd
       - sdk: libz.tbd
+
+  # The Top Shelf: Continue Watching and Next Up over the app's icon, from the list the app saves.
+  AIOStreamsTopShelf:
+    type: tv-app-extension
+    platform: tvOS
+    sources:
+      - path: TopShelf
+        excludes:
+          - Info.plist
+          - TopShelf.entitlements
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_NAME: AIOStreamsTopShelf
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.aiostreams.tvos.topshelf
+        INFOPLIST_FILE: TopShelf/Info.plist
+        CODE_SIGN_ENTITLEMENTS: TopShelf/TopShelf.entitlements
+        TARGETED_DEVICE_FAMILY: "3"
+        CODE_SIGN_STYLE: Automatic
+        APPLICATION_EXTENSION_API_ONLY: YES
+    dependencies:
+      - sdk: TVServices.framework

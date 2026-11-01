@@ -18,12 +18,23 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         window.backgroundColor = .black
         window.makeKeyAndVisible()
         self.window = window
-        if let url = launchOptions?[.url] as? URL { main.receiveLink(url.absoluteString) }
+        if let url = launchOptions?[.url] as? URL {
+            launchURL = url
+            main.receiveLink(url.absoluteString)
+        }
         return true
     }
 
-    /// `aiostreams://` links, such as an external player handing back where it stopped.
+    /// The link the app was launched with, which UIKit then hands to `open` as well.
+    private var launchURL: URL?
+    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+
+    /// `aiostreams://` links, such as an external player handing back where it stopped, or a Top Shelf title.
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
+        if url == launchURL {
+            launchURL = nil
+            return true
+        }
         main.receiveLink(url.absoluteString)
         return true
     }
@@ -33,7 +44,31 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
+        launchURL = nil
         main.appDidBecomeActive()
+    }
+
+    /**
+     * The page asks the server for Continue Watching and Next Up again 2 s
+     * after it's hidden, once the pause sent on leaving has arrived, and
+     * hands the answer on for the Top Shelf. A few seconds more awake let it.
+     */
+    func applicationDidEnterBackground(_ application: UIApplication) {
+        endBackgroundTask()
+        backgroundTask = application.beginBackgroundTask(withName: "top-shelf") { [weak self] in
+            self?.endBackgroundTask()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in self?.endBackgroundTask() }
+    }
+
+    func applicationWillEnterForeground(_ application: UIApplication) {
+        endBackgroundTask()
+    }
+
+    private func endBackgroundTask() {
+        guard backgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTask)
+        backgroundTask = .invalid
     }
 
     /// Movie playback, with as many channels as the TV's output takes.
