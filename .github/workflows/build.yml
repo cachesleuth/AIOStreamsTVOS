@@ -35,6 +35,15 @@ jobs:
           corepack enable
           bash scripts/fetch-web.sh
 
+      # 250 MB, so it's kept between runs; fetch-mpvkit.sh checks the version and hash.
+      - uses: actions/cache@v4
+        with:
+          path: .build/mpvkit
+          key: mpvkit-${{ hashFiles('scripts/fetch-mpvkit.sh') }}
+
+      - name: Fetch MPVKit
+        run: bash scripts/fetch-mpvkit.sh
+
       - name: Generate the Xcode project
         run: |
           brew install xcodegen

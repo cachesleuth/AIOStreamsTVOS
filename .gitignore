@@ -5,6 +5,9 @@
 # The web app's build, from scripts/fetch-web.sh
 WebBuild/
 
+# MPVKit, from scripts/fetch-mpvkit.sh
+Vendor/
+
 # Checkouts and build output
 .build/
 build/

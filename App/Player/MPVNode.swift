@@ -1,5 +1,5 @@
 import Foundation
-import Libmpv
+import MPVKit
 
 /// libmpv's values as JSON-ready Swift values: String, Bool, Int64, Double, arrays and dictionaries.
 enum MPVNode {

@@ -159,13 +159,10 @@ enum PlayerProtocol {
         return settings
     }
 
-    /// The page's font names, which are Android's; tvOS has fewer families.
+    /// The page's font names, which are Android's. libass here can only open the bundled Noto Sans, so all of them get it.
     private static func font(_ name: String) throws -> String? {
         switch name {
-        case "sans-serif": return nil
-        case "serif": return "Times New Roman"
-        case "monospace", "serif-monospace": return "Courier New"
-        case "casual", "cursive": return nil
+        case "sans-serif", "serif", "monospace", "serif-monospace", "casual", "cursive": return nil
         default: throw ProtocolError("\(name) is not a font")
         }
     }

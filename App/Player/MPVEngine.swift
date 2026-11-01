@@ -1,6 +1,6 @@
+import AVFoundation
 import Foundation
-import Libmpv
-import QuartzCore
+import MPVKit
 
 /// What the engine reports, always on the main thread.
 protocol MPVEngineListener: AnyObject {
@@ -11,49 +11,69 @@ protocol MPVEngineListener: AnyObject {
     /// `start`, `loaded` or `restart`.
     func engineEvent(_ name: String)
     func engineEnded(reason: String, error: String?, cause: String?)
+    /// The video's colours and frame rate, for the TV's picture mode.
+    func engineVideo(_ format: VideoFormat)
 }
 
 /**
- * libmpv drawing into a Metal layer, through gpu-next on Vulkan (MoltenVK),
- * with VideoToolbox decoding. Follows AIOStreams' Android MpvEngine: the same
+ * libmpv with Streamyfin's vo_avfoundation output: VideoToolbox decodes, and
+ * the frames go to an AVSampleBufferDisplayLayer with their HDR metadata, so
+ * HDR10 and HLG reach the TV as HDR. Set up as the working aiostreams-tvos
+ * project does. Otherwise follows AIOStreams' Android MpvEngine: the same
  * options, the same properties observed and the same reports.
- * Every mpv call runs on one serial queue.
+ * Every mpv call runs on one serial queue, never the main thread: mpv's video
+ * output waits on the main thread as it starts.
  */
 final class MPVEngine {
     private var mpv: OpaquePointer?
     private let queue = DispatchQueue(label: "mpv", qos: .userInitiated)
     weak var listener: MPVEngineListener?
     let configFile: URL
+    /// What mpv draws into; it doesn't retain it, and the view outlives mpv.
+    private weak var displayLayer: AVSampleBufferDisplayLayer?
 
     // Used on `queue` only.
     private var cause: String?
     private var styled: [String: String] = [:]
     private var subtitleScale: Double?
-    private var ownFont = ""
     private var hwdec: String?
     private var pictures = Set<String>()
     private var shownSubtitle: String?
     private var picture = false
 
-    init(layer: CAMetalLayer, configDir: URL, cacheDir: URL) throws {
+    init(layer: AVSampleBufferDisplayLayer, configDir: URL, fontsDir: URL?) throws {
         configFile = configDir.appendingPathComponent("mpv.conf")
+        displayLayer = layer
         guard let mpv = mpv_create() else { throw ProtocolError("libmpv could not start") }
         self.mpv = mpv
 
         var wid = Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque()))
         mpv_set_option(mpv, "wid", MPV_FORMAT_INT64, &wid)
+        // In this order: Streamyfin found tvOS freezes leaving the player otherwise.
         for (name, value) in [
+            ("vo", "avfoundation"),
+            ("avfoundation-composite-osd", "no"),
+            ("hwdec", "videotoolbox"),
+            ("hwdec-codecs", "all"),
+            ("hwdec-software-fallback", "yes"),
+            // Tells the display layer the video's colours, so HDR reaches the TV as HDR.
+            ("target-colorspace-hint", "yes"),
+            // audiounit keeps video timed to the HDMI output's real clock.
+            ("ao", "audiounit"),
+            ("audio-client-name", "AIOStreams"),
             ("config", "yes"),
             ("config-dir", configDir.path),
-            ("gpu-shader-cache-dir", cacheDir.path),
-            ("vo", "gpu-next"),
-            ("gpu-api", "vulkan"),
-            ("gpu-context", "moltenvk"),
-            ("hwdec", "videotoolbox"),
             ("video-rotate", "no"),
+            // Streams from addons drop now and then; FFmpeg reconnects rather than ending the file.
+            ("stream-lavf-o", "reconnect=1,reconnect_on_http_error=%23%408,429,500,502,503,504,reconnect_delay_max=15"),
+            // libass can't open tvOS's own font files, so subtitles use the bundled Noto Sans.
+            ("sub-font", Self.subtitleFont),
+            ("sub-scale-with-window", "no"),
+            ("sub-use-margins", "no"),
         ] {
             mpv_set_option_string(mpv, name, value)
         }
+        if let fontsDir { mpv_set_option_string(mpv, "sub-fonts-dir", fontsDir.path) }
         Self.applyFixed(mpv, option: true)
         mpv_request_log_messages(mpv, "warn")
         guard mpv_initialize(mpv) >= 0 else {
@@ -63,7 +83,6 @@ final class MPVEngine {
         }
         // The user's mpv.conf may set these, but the app drives playback itself.
         Self.applyFixed(mpv, option: false)
-        ownFont = property("sub-font") ?? ""
         for (name, format) in Self.observed {
             mpv_observe_property(mpv, 0, name, format)
         }
@@ -153,8 +172,14 @@ final class MPVEngine {
             func put(_ name: String, _ value: String) {
                 if styled.updateValue(value, forKey: name) != value { set(name, value) }
             }
-            put("keepaspect", Self.flag(style.fit != .stretch))
-            put("panscan", style.fit == .crop ? "1" : "0")
+            // The display layer scales the picture itself.
+            let gravity: AVLayerVideoGravity
+            switch style.fit {
+            case .fit: gravity = .resizeAspect
+            case .crop: gravity = .resizeAspectFill
+            case .stretch: gravity = .resize
+            }
+            DispatchQueue.main.async { [weak self] in self?.displayLayer?.videoGravity = gravity }
             put("sub-ass-force-margins", Self.flag(style.fit == .crop))
             put("sub-bold", Self.flag(s.bold))
             put("sub-color", s.color)
@@ -162,7 +187,7 @@ final class MPVEngine {
             put("sub-outline-size", String(s.outlineSize))
             put("sub-shadow-offset", String(s.shadowSize))
             put("sub-shadow-color", s.outlineColor)
-            put("sub-font", s.font ?? ownFont)
+            put("sub-font", s.font ?? Self.subtitleFont)
             put("sub-back-color", s.backColor)
             put("sub-border-style", s.box ? "background-box" : "outline-and-shadow")
             put("sub-ass-override", s.forceStyle ? "force" : "scale")
@@ -199,9 +224,18 @@ final class MPVEngine {
         queue.async { [self] in run(["load-config-file", configFile.path]) }
     }
 
-    /// Off while the app is in the background, which otherwise leaves a black picture on return.
-    func setVideoEnabled(_ on: Bool) {
-        queue.async { [self] in set("vid", on ? "auto" : "no") }
+    /// The video's colours and frame rate, read when mpv reports new video parameters.
+    private func reportVideo(_ params: Message) {
+        var fps = 0.0
+        if let mpv { mpv_get_property(mpv, "container-fps", MPV_FORMAT_DOUBLE, &fps) }
+        let dolbyVision = property("current-tracks/video/dolby-vision-profile").flatMap(Int.init)
+        let format = VideoFormat(
+            primaries: params["primaries"] as? String ?? "",
+            gamma: params["gamma"] as? String ?? "",
+            fps: fps,
+            dolbyVisionProfile: dolbyVision
+        )
+        emit { $0.engineVideo(format) }
     }
 
     /// Reads on the calling thread; libmpv's getters are thread-safe.
@@ -342,6 +376,9 @@ final class MPVEngine {
             let tracks = list.compactMap(Self.track)
             emit { $0.engineTracks(tracks) }
             return
+        case "video-params":
+            if let params = value as? Message { reportVideo(params) }
+            return
         case "chapter-list":
             let chapters: [Message] = ((value as? [Any]) ?? []).compactMap { item in
                 guard let chapter = item as? Message else { return nil }
@@ -388,7 +425,11 @@ final class MPVEngine {
         ("audio-params/format", MPV_FORMAT_STRING),
         ("track-list", MPV_FORMAT_NODE),
         ("chapter-list", MPV_FORMAT_NODE),
+        ("video-params", MPV_FORMAT_NODE),
     ]
+
+    /// The bundled font's family, which libass finds in `sub-fonts-dir`.
+    static let subtitleFont = "Noto Sans"
 
     private static func flag(_ on: Bool) -> String { on ? "yes" : "no" }
 

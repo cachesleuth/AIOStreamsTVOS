@@ -10,10 +10,6 @@ settings:
     SWIFT_VERSION: "5.0"
     # Set this to your Apple Developer team ID, or pick the team in Xcode.
     DEVELOPMENT_TEAM: ""
-packages:
-  MPVKit:
-    url: https://github.com/mpvkit/MPVKit
-    exactVersion: 1.1.0-n9.0.2
 targets:
   AIOStreamsTV:
     type: application
@@ -22,6 +18,11 @@ targets:
       - path: App
         excludes:
           - Info.plist
+          - Fonts
+      # A folder in the app, for libass to read the subtitle font from.
+      - path: App/Fonts
+        type: folder
+        buildPhase: resources
       # The web app's standalone build, from scripts/fetch-web.sh. Kept outside App:
       # macOS ignores case in names, so App/web would be the same folder as App/Web.
       - path: WebBuild
@@ -42,10 +43,28 @@ targets:
         CLANG_ENABLE_OBJC_ARC: YES
         # WebKit is loaded at runtime; nothing links against it.
         GCC_WARN_UNDECLARED_SELECTOR: NO
+        # MPVKit is one static library; this keeps its Objective-C (vo_avfoundation) linked in.
+        OTHER_LDFLAGS: ["$(inherited)", "-ObjC"]
     dependencies:
-      - package: MPVKit
-        product: MPVKit
+      # Streamyfin's MPVKit, with vo_avfoundation for HDR; from scripts/fetch-mpvkit.sh.
+      - framework: Vendor/MPVKit.xcframework
+        embed: false
       - sdk: MediaPlayer.framework
       - sdk: AVFoundation.framework
+      - sdk: AVKit.framework
+      - sdk: AudioToolbox.framework
+      - sdk: CoreAudio.framework
+      - sdk: CoreFoundation.framework
+      - sdk: CoreImage.framework
+      - sdk: CoreMedia.framework
+      - sdk: CoreVideo.framework
       - sdk: Metal.framework
       - sdk: QuartzCore.framework
+      - sdk: VideoToolbox.framework
+      - sdk: libbz2.tbd
+      - sdk: libc++.tbd
+      - sdk: libexpat.tbd
+      - sdk: libiconv.tbd
+      - sdk: libresolv.tbd
+      - sdk: libxml2.tbd
+      - sdk: libz.tbd

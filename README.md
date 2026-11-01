@@ -14,7 +14,7 @@ IPA is sideloaded.
 ┌──────────────────────────── screen ────────────────────────────┐
 │  WKWebView, transparent: the web app and its player controls   │
 │        ▲  window.aiostreamsApp: JSON messages both ways        │
-│  CAMetalLayer: mpv's frames (gpu-next, Vulkan on MoltenVK)     │
+│  AVSampleBufferDisplayLayer: mpv's frames, HDR metadata kept   │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -37,9 +37,24 @@ page the same way:
 - **The bridge** is the page's `window.aiostreamsApp`, added by a user script at document start.
   Page to app goes through `webkit.messageHandlers.aiostreamsNative`; app to page through
   `evaluateJavaScript`, which never blocks the app.
-- **mpv** comes from [MPVKit](https://github.com/mpvkit/MPVKit) (the LGPL build). `MPVEngine` and
-  `PlayerChannel` follow AIOStreams' Android `MpvEngine` and `PlayerChannel`: the same options,
-  observed properties and messages.
+- **mpv** comes from Streamyfin's [MPVKit](https://github.com/streamyfin/MPVKit) build (GPL), the
+  one the working aiostreams-tvos project uses, fetched by `scripts/fetch-mpvkit.sh`. Its
+  `vo_avfoundation` output hands VideoToolbox's frames to an `AVSampleBufferDisplayLayer` with their
+  HDR metadata. `MPVEngine` and `PlayerChannel` otherwise follow AIOStreams' Android `MpvEngine` and
+  `PlayerChannel`: the same observed properties and messages.
+
+### HDR and Dolby Vision
+
+- **HDR10 and HLG** reach the TV as HDR. When a video starts, `DisplayMode` asks tvOS for the
+  matching TV mode (HDR10, HLG or SDR) at the video's frame rate, and goes back to the TV's own mode
+  when playback ends. tvOS only switches with **Settings → Video and Audio → Match Content**
+  (Dynamic Range, and Frame Rate if you want that too) turned on.
+- **Dolby Vision** plays through its HDR10 base layer, so the TV shows HDR10, not Dolby Vision.
+  That covers profile 8 (most streaming releases) and profile 7 (UHD Blu-ray remuxes). Real Dolby
+  Vision output on Apple TV only comes from Apple's own player, which can't play what mpv plays.
+- **Profile 5** has no HDR10 base layer, so its colours come out wrong (purple and green).
+- Subtitles are drawn by libass with the bundled Noto Sans (SIL Open Font License), as libass can't
+  open tvOS's own fonts.
 
 ### Posing as the Android TV app
 
@@ -89,6 +104,7 @@ On a Mac with Xcode 16 or later, [XcodeGen](https://github.com/yonaskolb/XcodeGe
 
 ```sh
 bash scripts/fetch-web.sh       # clones AIOStreams into .build/ and builds the web app into WebBuild
+bash scripts/fetch-mpvkit.sh    # downloads Streamyfin's MPVKit (250 MB) into Vendor/, checked by SHA-256
 xcodegen generate               # writes AIOStreamsTV.xcodeproj from project.yml
 open AIOStreamsTV.xcodeproj
 ```
@@ -96,9 +112,6 @@ open AIOStreamsTV.xcodeproj
 `AIOSTREAMS_DIR=/path/to/AIOStreams bash scripts/fetch-web.sh` builds from a checkout you already have
 instead, and `AIOSTREAMS_REF=<branch or tag>` picks what to clone. The script only reads that repo.
 Safari's Develop menu on a Mac can inspect the page.
-
-Turn off Metal API Validation (Product → Scheme → Edit Scheme → Run → Diagnostics): MoltenVK trips it
-on HDR video. See [KhronosGroup/MoltenVK#2226](https://github.com/KhronosGroup/MoltenVK/issues/2226).
 
 ## Layout
 
@@ -113,5 +126,5 @@ on HDR video. See [KhronosGroup/MoltenVK#2226](https://github.com/KhronosGroup/M
 
 ## Licences
 
-MPVKit's LGPL build bundles mpv and FFmpeg under the LGPL. The web app is AIOStreams', under its
-licence.
+Streamyfin's MPVKit build is GPL-3.0, so builds of this app are for personal use. Noto Sans is under
+the SIL Open Font License. The web app is AIOStreams', under its licence.

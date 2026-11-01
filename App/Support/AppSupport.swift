@@ -93,13 +93,14 @@ enum AppAnswers {
     static let licenses: Message = [
         "type": "licenses",
         "texts": [
-            "GNU Lesser General Public License, version 3: https://www.gnu.org/licenses/lgpl-3.0.html",
-            "GNU Lesser General Public License, version 2.1 or later: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html",
+            "GNU General Public License, version 3: https://www.gnu.org/licenses/gpl-3.0.html",
+            "SIL Open Font License, version 1.1: https://openfontlicense.org",
         ],
         "libraries": [
-            ["name": "MPVKit", "licence": "LGPL-3.0", "url": "https://github.com/mpvkit/MPVKit", "texts": [0]],
-            ["name": "mpv", "licence": "LGPL-2.1-or-later", "url": "https://mpv.io", "texts": [1]],
-            ["name": "FFmpeg", "licence": "LGPL-2.1-or-later", "url": "https://ffmpeg.org", "texts": [1]],
+            ["name": "MPVKit (Streamyfin build)", "licence": "GPL-3.0", "url": "https://github.com/streamyfin/MPVKit", "texts": [0]],
+            ["name": "mpv", "licence": "GPL-3.0", "url": "https://mpv.io", "texts": [0]],
+            ["name": "FFmpeg", "licence": "GPL-3.0", "url": "https://ffmpeg.org", "texts": [0]],
+            ["name": "Noto Sans", "licence": "OFL-1.1", "url": "https://notofonts.github.io", "texts": [1]],
         ] as [Message],
     ]
 

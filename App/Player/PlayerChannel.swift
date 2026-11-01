@@ -47,6 +47,7 @@ final class PlayerChannel: MPVEngineListener {
                 loaded = false
                 engine.stop()
                 updateIdleTimer()
+                endVideo()
             case "player-set":
                 engine.change(try PlayerProtocol.change(message))
             case "player-seek":
@@ -73,7 +74,10 @@ final class PlayerChannel: MPVEngineListener {
             case "now-playing":
                 let item = message.object("item")
                 nowPlaying.setItem(item)
-                if item == nil { showVideo(false) }
+                if item == nil {
+                    showVideo(false)
+                    endVideo()
+                }
             // No seek-bar thumbnails or subtitle index here: the page goes without them.
             case "player-thumbnail":
                 send(["type": "player-thumbnail", "url": message.text("url") ?? "", "src": NSNull()])
@@ -130,6 +134,25 @@ final class PlayerChannel: MPVEngineListener {
 
     func engineEvent(_ name: String) {
         send(["type": "player-event", "name": name])
+    }
+
+    /// The TV's picture mode follows the video; nil goes back to the TV's own.
+    var onVideoFormat: (VideoFormat?) -> Void = { _ in }
+    private var videoFormat: VideoFormat?
+
+    func engineVideo(_ format: VideoFormat) {
+        guard loaded, format != videoFormat else { return }
+        videoFormat = format
+        if format.needsDolbyVisionProcessing {
+            NSLog("[player] Dolby Vision profile 5 has no HDR10 base layer; its colours will be off")
+        }
+        onVideoFormat(format)
+    }
+
+    private func endVideo() {
+        guard videoFormat != nil else { return }
+        videoFormat = nil
+        onVideoFormat(nil)
     }
 
     func engineEnded(reason: String, error: String?, cause: String?) {

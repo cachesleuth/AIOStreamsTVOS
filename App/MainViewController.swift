@@ -1,4 +1,11 @@
+import AVFoundation
 import UIKit
+
+/// The view mpv draws into: its own layer is the display layer vo_avfoundation hands frames to.
+final class SampleBufferView: UIView {
+    override class var layerClass: AnyClass { AVSampleBufferDisplayLayer.self }
+    var displayLayer: AVSampleBufferDisplayLayer { layer as! AVSampleBufferDisplayLayer }
+}
 
 /**
  * mpv's video beneath, the web app over it, and the bridge between them.
@@ -7,8 +14,7 @@ import UIKit
  * and the remote taken at the window and handed to the page as keys.
  */
 final class MainViewController: UIViewController, RemoteReceiver {
-    private let videoView = UIView()
-    private let videoLayer = MetalLayer()
+    private let videoView = SampleBufferView()
     private var web: AIOWebView?
     private let status = UILabel()
     private var engine: MPVEngine?
@@ -31,11 +37,8 @@ final class MainViewController: UIViewController, RemoteReceiver {
         videoView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         videoView.isHidden = true
         videoView.isUserInteractionEnabled = false
-        videoLayer.frame = videoView.bounds
-        videoLayer.contentsScale = UIScreen.main.nativeScale
-        videoLayer.framebufferOnly = true
-        videoLayer.backgroundColor = UIColor.black.cgColor
-        videoView.layer.addSublayer(videoLayer)
+        videoView.backgroundColor = .black
+        videoView.displayLayer.videoGravity = .resizeAspect
         view.addSubview(videoView)
 
         status.frame = view.bounds.insetBy(dx: 160, dy: 160)
@@ -98,8 +101,6 @@ final class MainViewController: UIViewController, RemoteReceiver {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        videoLayer.frame = videoView.bounds
-        if let scale = view.window?.screen.nativeScale { videoLayer.contentsScale = scale }
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -155,14 +156,21 @@ final class MainViewController: UIViewController, RemoteReceiver {
 
     private func startPlayer() {
         do {
-            let engine = try MPVEngine(layer: videoLayer, configDir: AppFolders.mpv, cacheDir: AppFolders.shaders)
+            let fonts = Bundle.main.url(forResource: "Fonts", withExtension: nil)
+            let engine = try MPVEngine(layer: videoView.displayLayer, configDir: AppFolders.mpv, fontsDir: fonts)
             self.engine = engine
-            player = PlayerChannel(
+            let player = PlayerChannel(
                 engine: engine,
                 subtitlesDir: AppFolders.subtitles,
                 send: { [weak self] in self?.sendToPage($0) },
                 showVideo: { [weak self] in self?.videoView.isHidden = !$0 }
             )
+            // HDR10, HLG or SDR at the video's frame rate, where Match Content is on.
+            player.onVideoFormat = { [weak self] format in
+                guard let window = self?.view.window else { return }
+                if let format { DisplayMode.apply(format, in: window) } else { DisplayMode.reset(in: window) }
+            }
+            self.player = player
         } catch {
             NSLog("[app] mpv did not start: %@", String(describing: error))
         }
@@ -359,11 +367,9 @@ final class MainViewController: UIViewController, RemoteReceiver {
         storage.save()
         input.stopRepeating()
         player?.change(Change(paused: true))
-        engine?.setVideoEnabled(false)
     }
 
     func appDidBecomeActive() {
-        engine?.setVideoEnabled(true)
         web?.focusPage()
     }
 }
