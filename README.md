@@ -56,6 +56,12 @@ page the same way:
 - Subtitles are drawn by libass with the bundled Noto Sans (SIL Open Font License), as libass can't
   open tvOS's own fonts.
 
+### Trailers
+
+YouTube trailers play in mpv. The app asks YouTube's player API for the video's stream, as
+AIOStreams' desktop and Android apps do (`App/Player/YouTube.swift`). Where YouTube gives none,
+the page opens the trailer's link, which goes to the YouTube app if it's installed.
+
 ### Artwork size
 
 The page asks for artwork at its device pixel ratio, which tvOS reports as 2 on a 4K TV, and

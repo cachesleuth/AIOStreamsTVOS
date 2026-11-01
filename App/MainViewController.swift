@@ -403,7 +403,11 @@ final class MainViewController: UIViewController, RemoteReceiver {
         case "update-check", "update-apply":
             sendToPage(AppAnswers.updateState)
         case "youtube-resolve":
-            sendToPage(["type": "youtube-resolved", "request": message.text("request") ?? "", "url": NSNull()])
+            // A trailer: its stream, for mpv. Without one the page opens the link, which the YouTube app takes.
+            let request = message.text("request") ?? ""
+            YouTube.resolve(message.text("id") ?? "") { [weak self] url in
+                self?.sendToPage(["type": "youtube-resolved", "request": request, "url": nullable(url)])
+            }
         case "voice-search":
             // Dictation is on the keyboard's microphone; the page doesn't offer its own here.
             sendToPage(["type": "voice-result", "text": NSNull(), "error": "failed"])
