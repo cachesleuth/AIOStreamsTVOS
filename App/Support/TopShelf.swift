@@ -21,7 +21,7 @@ enum TopShelf {
         if saved {
             TVTopShelfContentProvider.topShelfContentDidChange()
         } else {
-            NSLog("[top-shelf] no App Group container for %@; is the app signed with it?", TopShelfStore.group)
+            NSLog("[top-shelf] no App Group container took the list; groups: %@", TopShelfStore.entitled.joined(separator: ", "))
         }
     }
 
@@ -47,8 +47,8 @@ enum TopShelf {
      * list, and whether tvOS has asked the extension for it.
      */
     static var report: [String] {
-        let groups = TopShelfStore.entitled
-        let container = TopShelfStore.folder != nil
+        let groups = TopShelfStore.entitled.count
+        let containers = TopShelfStore.folders.count
         let plugins = Bundle.main.builtInPlugInsURL
         let bundled = plugins.map {
             FileManager.default.fileExists(atPath: $0.appendingPathComponent("AIOStreamsTopShelf.appex").path)
@@ -60,11 +60,11 @@ enum TopShelf {
         let asked = TopShelfStore.lastAsked().map {
             "\(DateFormatter.localizedString(from: $0.date, dateStyle: .short, timeStyle: .medium)), showed \($0.shown)"
         } ?? "never"
+        // Short lines: the app menu cuts off what doesn't fit.
         return [
-            "Top Shelf: App Group \(groups.isEmpty ? "missing from the signature" : groups.joined(separator: ", "))"
-                + (container ? "" : " (no container)"),
-            "Top Shelf extension: \(bundled ? "in the app" : "missing"); tvOS last asked it: \(asked)",
-            "Top Shelf list from the page: \(page); saved: \(TopShelfStore.load().count)",
+            "Top Shelf: \(groups) App Groups, \(containers) containers; extension \(bundled ? "in the app" : "missing")",
+            "Top Shelf asked: \(asked)",
+            "Top Shelf list: \(page); saved \(TopShelfStore.load().count)",
         ]
     }
 }

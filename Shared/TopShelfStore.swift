@@ -48,10 +48,12 @@ struct TopShelfItem: Codable, Equatable {
 }
 
 /**
- * Where the app leaves the Top Shelf's list for the extension:
- * a folder in the App Group both are entitled to. Sideloading tools may
- * rename the group when they re-sign, so the group is read from this
- * process's own entitlements, falling back to the one the project declares.
+ * Where the app leaves the Top Shelf's list for the extension: a folder in
+ * each App Group this process is signed with. Sideloading tools rename the
+ * groups when they re-sign, some to a handful of generic ones
+ * (`group.<hash>.1` to `.5`) in no set order, so neither side can tell which
+ * one the other picked. The app writes to all of them, and each side reads
+ * the newest copy it finds in any.
  */
 enum TopShelfStore {
     static let declaredGroup = "group.io.github.aiostreams.tvos"
@@ -59,51 +61,68 @@ enum TopShelfStore {
     /// The Top Shelf's artwork width, in pixels: 548 points at 2x.
     static let imageWidth = 1096
 
-    /// The App Groups this process was signed with, for the app menu.
+    /// The App Groups this process was signed with.
     static let entitled = entitledGroups()
 
-    static let group: String = {
-        entitled.first { $0.lowercased().contains("aiostreams") } ?? entitled.first ?? declaredGroup
+    /// A TopShelf folder in each group's container that tvOS gave this process.
+    static let folders: [URL] = {
+        let groups = entitled.isEmpty ? [declaredGroup] : entitled
+        return groups.compactMap {
+            FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0)?
+                .appendingPathComponent("TopShelf", isDirectory: true)
+        }
     }()
 
-    static var folder: URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)?
-            .appendingPathComponent("TopShelf", isDirectory: true)
+    private static let listName = "items.json"
+    private static let askedName = "asked.txt"
+
+    /// The most recently written copy of a file, across the groups.
+    private static func newest(_ name: String) -> URL? {
+        folders
+            .map { $0.appendingPathComponent(name) }
+            .compactMap { url -> (URL, Date)? in
+                guard let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                    .contentModificationDate else { return nil }
+                return (url, date)
+            }
+            .max { $0.1 < $1.1 }?.0
     }
 
-    private static var listFile: URL? { folder?.appendingPathComponent("items.json") }
+    /// Into every group; true if at least one took it.
+    private static func write(_ data: Data, as name: String) -> Bool {
+        var wrote = false
+        for folder in folders {
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try data.write(to: folder.appendingPathComponent(name), options: .atomic)
+                wrote = true
+            } catch {
+                NSLog("[top-shelf] writing %@ to %@: %@", name, folder.path, error.localizedDescription)
+            }
+        }
+        return wrote
+    }
 
     static func load() -> [TopShelfItem] {
-        guard let file = listFile, let data = try? Data(contentsOf: file) else { return [] }
+        guard let file = newest(listName), let data = try? Data(contentsOf: file) else { return [] }
         return (try? JSONDecoder().decode([TopShelfItem].self, from: data)) ?? []
     }
 
     @discardableResult
     static func save(_ items: [TopShelfItem]) -> Bool {
-        guard let folder, let file = listFile, let data = try? JSONEncoder().encode(items) else { return false }
-        do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            try data.write(to: file, options: .atomic)
-            return true
-        } catch {
-            NSLog("[top-shelf] saving the list: %@", error.localizedDescription)
-            return false
-        }
+        guard let data = try? JSONEncoder().encode(items) else { return false }
+        return write(data, as: listName)
     }
-
-    private static var askedFile: URL? { folder?.appendingPathComponent("asked.txt") }
 
     /// The extension notes when tvOS asked it for the Top Shelf, and what it showed.
     static func noteAsked(shown: Int) {
-        guard let folder, let file = askedFile else { return }
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let line = "\(ISO8601DateFormatter().string(from: Date())) \(shown)"
-        try? line.write(to: file, atomically: true, encoding: .utf8)
+        _ = write(Data(line.utf8), as: askedName)
     }
 
     /// When tvOS last asked the extension, and how many titles it showed then.
     static func lastAsked() -> (date: Date, shown: Int)? {
-        guard let file = askedFile, let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+        guard let file = newest(askedName), let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
         let parts = text.split(separator: " ")
         guard parts.count == 2, let date = ISO8601DateFormatter().date(from: String(parts[0])),
               let shown = Int(parts[1]) else { return nil }

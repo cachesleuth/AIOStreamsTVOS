@@ -77,9 +77,11 @@ again.
   the app leaves the screen, and the app stays awake that long.
 - With nothing to show, tvOS shows the Top Shelf image instead.
 - The App Group is `group.io.github.aiostreams.tvos`. The CI build ad-hoc signs the app and the
-  extension with it, so a sideloading tool can carry it over when it re-signs; some rename the
-  group, and both sides read the name from their own entitlements. If the Top Shelf stays on the
-  image, the signing dropped the group: the app's log says `[top-shelf] no App Group container`.
+  extension with it, so a sideloading tool can carry it over when it re-signs. Some tools swap it
+  for generic groups (`group.<hash>.1` to `.5`) in no set order, so the app writes the list to every
+  group it's signed with, and the extension reads the newest copy from any of them.
+- The app menu (hold Play/Pause) shows the groups, the extension, the page's list and when tvOS last
+  asked the extension. If tvOS never asks, restart the Apple TV once after installing.
 
 ### Artwork size
 
