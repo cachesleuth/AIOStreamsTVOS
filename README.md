@@ -116,21 +116,32 @@ This was written without a Mac, so none of it has run. In rough order of risk:
 5. **The keyboard.** Select on a field opens a native text-entry screen over the page. The web
    app's Android TV mode keeps focused fields read-only until Select (`src/lib/tv.ts`), so the app
    sends the page an Enter first to unlock the field.
-6. **Scale and focus ring.** The web app lays a TV's page out 1280 wide; the app scales it to the
-   screen (`scalesPageToFit`, plus a fixed scale added to the page's viewport). WebKit shows
-   `:focus-visible` only after real key presses, and the remote's keys come from script, so the
-   bridge script rewrites `:focus-visible` to `:focus` in the page's stylesheets and selector calls.
+6. **Scale and focus ring.** The web app lays a TV's page out 1280 wide and leaves scaling to the
+   web view, which UIWebView doesn't do reliably from the viewport alone. The app zooms the web
+   view's scroll view itself whenever the page is drawn narrower than the screen, or reports more
+   of itself on screen than it lays out; each zoom is written to the start-up log. UIWebView's
+   WebKit drops every CSS rule that names `:focus-visible`, the focus ring included, so
+   `AppURLProtocol` rewrites it to `:focus` in each `.css` file as it serves it, and the bridge
+   script does the same for `<style>` added at run time and for the page's selector calls.
 7. **Swipe sensitivity** (`RemoteInput.swipeStep`) is a guess.
 8. **MPVKit** describes itself as not production quality. HDR passthrough isn't set up.
 
 ## When the page doesn't start
 
-A TV has no console, so the app keeps the page's errors itself. If the page hasn't drawn anything
-20 seconds after it starts loading (10 after it finishes), an error screen shows the app and web
-app versions, the page's state and its last errors, with **Try again** and **Reset the app's data**.
-Holding Play/Pause for 2 seconds opens the same screen at any time. Resetting clears the page's
-localStorage, IndexedDB and WebKit files, and the app's own copy of localStorage, which would
-otherwise put it back.
+A TV has no console, so the app keeps a log of each page start in the user defaults as it happens:
+index.html served, the start-up script running, the bridge connecting, the page drawing, and every
+error the page reports. Because it's saved as it goes, it survives an app that froze and was
+force-quit.
+
+- **Next launch:** if the last start never drew the page, the app shows that log before loading
+  anything, with **Try again**, **Reset the app's data** and **Close** (which also starts the page).
+- **This launch:** if nothing is drawn 20 seconds after the page starts loading (10 after it
+  finishes), the same screen opens over it. Holding Play/Pause for 2 seconds opens it at any time.
+
+The app never waits on the page for any of this: UIWebView runs scripts synchronously, so asking a
+stuck page anything would freeze the app with it. The page sends its status every few seconds
+instead. Resetting deletes WebKit's files and the app's copy of localStorage, and the next page start
+clears what WebKit still holds in memory before the page reads it.
 
 ## Layout
 

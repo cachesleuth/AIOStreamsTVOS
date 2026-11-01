@@ -17,13 +17,15 @@ enum BridgeScript {
         let deviceId: String
     }
 
-    static func make(identity: Identity, storage: [String: String]) -> String {
+    /// `clear` forgets the page's saved data before it starts, for a reset.
+    static func make(identity: Identity, storage: [String: String], clear: Bool) -> String {
         let encoder = JSONEncoder()
         let identityJSON = (try? encoder.encode(identity)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        let storageJSON = (try? encoder.encode(storage)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        let storageJSON = (try? encoder.encode(clear ? [:] : storage)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         return template
             .replacingOccurrences(of: "__IDENTITY__", with: identityJSON)
             .replacingOccurrences(of: "__STORAGE__", with: storageJSON)
+            .replacingOccurrences(of: "__CLEAR__", with: clear ? "true" : "false")
     }
 
     private static let template = #"""
@@ -36,6 +38,16 @@ enum BridgeScript {
   }
   var identity = __IDENTITY__;
   var saved = __STORAGE__;
+  // A reset: the page's saved data goes before anything reads it.
+  if (__CLEAR__) {
+    try { localStorage.clear(); } catch (e) {}
+    try { sessionStorage.clear(); } catch (e) {}
+    try {
+      if (window.indexedDB && indexedDB.databases) indexedDB.databases().then(function (all) {
+        all.forEach(function (db) { if (db.name) indexedDB.deleteDatabase(db.name); });
+      });
+    } catch (e) {}
+  }
   var listeners = [];
   var queue = [];
 
@@ -134,9 +146,9 @@ enum BridgeScript {
       ', minimum-scale=' + scale + ', maximum-scale=' + scale + ', user-scalable=no');
   }
 
-  // The page rings what has focus with :focus-visible, which WebKit only
-  // applies after a real key press, and the remote's keys come from script.
-  // With no pointer here, any focus is a remote's, so it reads as :focus.
+  // The page rings what has focus with :focus-visible, which UIWebView's WebKit
+  // leaves off. With no pointer here, any focus is a remote's, so it reads as
+  // :focus, here for the page's own selector calls.
   // Not an escaped `\:focus-visible`, which is part of a class name such as Tailwind's.
   var FOCUS_VISIBLE = /(^|[^\\]):focus-visible/g;
   function plainFocus(selector) {
@@ -152,28 +164,15 @@ enum BridgeScript {
       };
     });
   });
-  function plainFocusRules(rules) {
-    if (!rules) return;
-    for (var i = 0; i < rules.length; i++) {
-      var rule = rules[i];
-      if (rule.selectorText && rule.selectorText.indexOf(':focus-visible') >= 0) {
-        try { rule.selectorText = plainFocus(rule.selectorText); } catch (e) {}
-      }
-      if (rule.cssRules) plainFocusRules(rule.cssRules);
-    }
-  }
-  var sheetsTimer = 0;
-  function plainFocusSheets() {
-    clearTimeout(sheetsTimer);
-    sheetsTimer = setTimeout(function () {
-      for (var i = 0; i < document.styleSheets.length; i++) {
-        try { plainFocusRules(document.styleSheets[i].cssRules); } catch (e) {}
-      }
-    }, 0);
+  // WebKit drops a rule naming :focus-visible as it parses it, so a rule has
+  // to be rewritten before that. The app rewrites the bundled .css files as it
+  // serves them; this does the same for <style> the page adds as it runs.
+  function plainFocusStyle(node) {
+    var css = node.textContent;
+    if (css && css.indexOf(':focus-visible') >= 0) node.textContent = plainFocus(css);
   }
 
   new MutationObserver(function (changes) {
-    var sheets = false;
     for (var i = 0; i < changes.length; i++) {
       var change = changes[i];
       if (change.type === 'attributes') {
@@ -183,19 +182,12 @@ enum BridgeScript {
       for (var j = 0; j < change.addedNodes.length; j++) {
         var node = change.addedNodes[j];
         if (node.tagName === 'META') fitViewport(node);
-        else if (node.tagName === 'STYLE' || node.tagName === 'LINK') sheets = true;
+        else if (node.tagName === 'STYLE') plainFocusStyle(node);
       }
     }
-    if (sheets) plainFocusSheets();
   }).observe(document.documentElement, {
     subtree: true, childList: true, attributes: true, attributeFilter: ['content']
   });
-  // A stylesheet's rules are readable once it loads.
-  document.addEventListener('load', function (e) {
-    if (e.target && e.target.tagName === 'LINK') plainFocusSheets();
-  }, true);
-  document.addEventListener('DOMContentLoaded', plainFocusSheets);
-  window.addEventListener('load', plainFocusSheets);
 
   // tvOS may clear a web view's storage with the caches, so the app keeps a
   // copy of localStorage and puts back what is missing before the page starts.
@@ -251,26 +243,54 @@ enum BridgeScript {
     reportError('Unhandled rejection: ' + String((reason && (reason.stack || reason.message)) || reason));
   });
   var consoleError = console.error;
+  var consoleErrorsSent = 0;
   console.error = function () {
     try {
-      logError([].map.call(arguments, function (a) {
+      var text = [].map.call(arguments, function (a) {
         return a && a.stack ? a.stack : typeof a === 'object' ? JSON.stringify(a) : String(a);
-      }).join(' '));
+      }).join(' ');
+      logError(text);
+      // React reports a crash here; the first few reach the app's log.
+      if (consoleErrorsSent++ < 10) post({ type: 'web-error', message: 'console.error: ' + text });
     } catch (e) {}
     return consoleError.apply(console, arguments);
   };
-  // Read by the app directly, so it works even when the bridge never connected.
-  window.__aiostreamsStatus = function () {
+
+  // The app never asks the page anything it has to wait for, since a stuck
+  // page would hold the app up too. The page tells it how it is instead.
+  function status() {
     var root = document.getElementById('root');
-    return JSON.stringify({
+    var text = root ? (root.textContent || '').replace(/\s+/g, ' ').trim() : '';
+    return {
+      type: 'tvos-status',
       href: location.href,
       readyState: document.readyState,
       rendered: !!root && root.childNodes.length > 0,
-      bridge: !!window.__aiostreamsPost,
+      text: text.slice(0, 160),
+      // The width the page lays out at (1280 on a TV), which the app zooms to the screen.
+      layoutWidth: document.documentElement ? document.documentElement.clientWidth : 0,
+      visibleWidth: window.innerWidth || 0,
       storageKeys: (function () { try { return localStorage.length; } catch (e) { return -1; } })(),
-      errors: errorLog
-    });
-  };
+      errors: errorLog.length
+    };
+  }
+  window.__aiostreamsStatus = function () { return JSON.stringify(status()); };
+  // Often while it starts, then now and then: reading the page's text isn't free.
+  var statusCount = 0;
+  (function sendStatus() {
+    post(status());
+    statusCount++;
+    setTimeout(sendStatus, statusCount < 20 ? 3000 : 15000);
+  })();
+  document.addEventListener('DOMContentLoaded', function () { post(status()); });
+  window.addEventListener('load', function () { post(status()); });
+  // A new layout width (the page's TV viewport taking effect) reaches the app at once.
+  var resizeTimer = 0;
+  window.addEventListener('resize', function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () { post(status()); }, 150);
+  });
+  post({ type: 'tvos-boot', storageKeys: (function () { try { return localStorage.length; } catch (e) { return -1; } })() });
 
   // The Android app's bridge, as the web app reads it: `tv` gets the TV layout.
   window.aiostreamsApp = Object.freeze({

@@ -15,8 +15,12 @@ final class MainViewController: UIViewController {
     /// `aiostreams://` links, held until the page listens for them.
     private var links: [String] = []
     private var linksReady = false
-    /// What failed outside the page since it last started loading.
-    private var nativeErrors: [String] = []
+    /// The page's latest report on itself.
+    private var latestStatus: PageStatus?
+    private var contentSizeWatch: NSKeyValueObservation?
+    private var connectedLogged = false
+    /// The last start never drew the page, so this one shows what happened first.
+    private var recoverOnAppear = false
     /// Counts page loads, so a check scheduled for an older one does nothing.
     private var loadGeneration = 0
     /// How long the page has to draw something before the error screen shows.
@@ -26,6 +30,9 @@ final class MainViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
+        // Read before this start writes over them.
+        recoverOnAppear = RunLog.lastStartFailed
+        _ = RunLog.previous
         AppFolders.create()
         MPVConfig.writeFile()
 
@@ -55,61 +62,59 @@ final class MainViewController: UIViewController {
         // Read here, on the main thread; the protocol serves the page from another.
         let identity = Identity.script
         AppURLProtocol.bootScript = {
-            BridgeScript.make(identity: identity, storage: WebStorageMirror.load())
+            BridgeScript.make(
+                identity: identity,
+                storage: WebStorageMirror.load(),
+                clear: WebStorageMirror.takeClearRequest()
+            )
         }
         URLProtocol.registerClass(AppURLProtocol.self)
         guard AppURLProtocol.webRoot != nil else {
             return showProblem("The web app is missing from this build. Run scripts/fetch-web.sh, then build again.")
         }
-        startPage()
+        // A start that never drew may be one the page hangs on, so nothing loads until the user chooses.
+        if !recoverOnAppear { startPage() }
     }
 
     /// Loads the web app from the start, and checks that it draws.
     private func startPage() {
         guard let web else { return }
         loadGeneration += 1
-        nativeErrors.removeAll()
+        latestStatus = nil
+        connectedLogged = false
         linksReady = false
+        RunLog.begin("Loading the page; app \(Identity.version), web app \(Diagnostics.webCommit), " +
+                     "\(WebStorageMirror.load().count) keys in the app's copy")
         bridge.pageStarted()
         web.load(AppURLProtocol.startURL)
         checkPage(after: Self.startTimeout)
     }
 
+    /// Never asks the page: one that is stuck would never answer, and the app would wait with it.
     private func checkPage(after delay: TimeInterval) {
         let generation = loadGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self, self.loadGeneration == generation else { return }
-            let (status, _) = self.pageStatus()
-            if status?.rendered != true { self.showDiagnostics(title: "The app could not start") }
+            guard let self, self.loadGeneration == generation, self.latestStatus?.rendered != true else { return }
+            RunLog.add("Nothing drawn after \(Int(delay)) s")
+            self.showDiagnostics(title: "The app could not start")
         }
     }
 
-    private func pageStatus() -> (PageStatus?, String?) {
-        let raw = web?.evaluate("window.__aiostreamsStatus ? __aiostreamsStatus() : ''")
-        let status = raw.flatMap { try? JSONDecoder().decode(PageStatus.self, from: Data($0.utf8)) }
-        return (status, raw)
-    }
-
-    /// The error screen, shown when the page doesn't start, or on a long Play/Pause.
-    private func showDiagnostics(title: String) {
+    /// The error screen: when the page doesn't start, on a long Play/Pause, or after a start that never drew.
+    private func showDiagnostics(title: String, lines: [String]? = nil, beforeStart: Bool = false) {
         guard presentedViewController == nil else { return }
         // Shown once per load; Try again starts a new one.
         loadGeneration += 1
-        let (status, raw) = pageStatus()
-        let report = Diagnostics.report(status: status, rawStatus: raw, nativeErrors: nativeErrors)
-        NSLog("[app] %@\n%@", title, report)
+        let report = Diagnostics.report(status: beforeStart ? nil : latestStatus, lines: lines ?? RunLog.lines)
         let screen = DiagnosticsViewController(title: title, report: report)
         screen.onRetry = { [weak self] in self?.startPage() }
         screen.onReset = { [weak self] in
-            guard let self else { return }
-            Diagnostics.resetWebData(web: self.web)
-            self.startPage()
+            Diagnostics.resetWebData()
+            self?.startPage()
         }
+        // Before the page has started, closing starts it.
+        screen.onClose = beforeStart ? { [weak self] in self?.startPage() } : {}
         present(screen, animated: true)
-    }
-
-    @objc private func heldPlayPause(_ press: UILongPressGestureRecognizer) {
-        if press.state == .began { showDiagnostics(title: "Diagnostics") }
     }
 
     override func viewDidLayoutSubviews() {
@@ -124,6 +129,10 @@ final class MainViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         becomeFirstResponder()
+        if recoverOnAppear, web != nil {
+            recoverOnAppear = false
+            showDiagnostics(title: "The app didn't start last time", lines: RunLog.previous, beforeStart: true)
+        }
     }
 
     // MARK: Setup
@@ -169,11 +178,12 @@ final class MainViewController: UIViewController {
         webDelegate.didFinish = { [weak self] in
             guard let self, let web = self.web else { return }
             self.checkPage(after: Self.afterLoadTimeout)
+            self.fitPage(self.latestStatus)
             // Where WebKit never sent the context callback, the page gets its function now.
             self.bridge.pageLoaded {
                 if let context = web.javaScriptContext,
                    context.objectForKeyedSubscript("__aiostreamsPost")?.isUndefined != false {
-                    JSContextHook.install(in: context)
+                    JSContextHook.install(in: context, from: "after load")
                 }
             }
         }
@@ -182,11 +192,15 @@ final class MainViewController: UIViewController {
             // A load the page itself replaced or stopped isn't a failure.
             guard error.domain != NSURLErrorDomain || error.code != NSURLErrorCancelled else { return }
             let address = (error.userInfo[NSURLErrorFailingURLStringErrorKey] as? String).map { " (\($0))" } ?? ""
-            self?.nativeErrors.append("Load failed: \(error.localizedDescription)\(address)")
+            RunLog.add("Load failed: \(error.localizedDescription)\(address)")
             self?.checkPage(after: 1)
         }
         web.setDelegate(webDelegate)
         view.addSubview(web.view)
+        // The page's width can change without a resize event, as after signing in.
+        contentSizeWatch = web.scrollView?.observe(\.contentSize, options: [.new]) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.fitPage(self?.latestStatus) }
+        }
     }
 
     private func setUpInput() {
@@ -207,13 +221,8 @@ final class MainViewController: UIViewController {
             self.keyboard.begin(info)
             return true
         }
+        input.heldPlayPause = { [weak self] in self?.showDiagnostics(title: "Diagnostics") }
         input.attach(to: view)
-        let hold = UILongPressGestureRecognizer(target: self, action: #selector(heldPlayPause(_:)))
-        hold.allowedPressTypes = [NSNumber(value: UIPress.PressType.playPause.rawValue)]
-        hold.allowedTouchTypes = []
-        hold.minimumPressDuration = 2
-        hold.cancelsTouchesInView = false
-        view.addGestureRecognizer(hold)
 
         keyboard.write = { [weak self] text in
             guard let literal = JSON.string([text]) else { return }
@@ -283,8 +292,19 @@ final class MainViewController: UIViewController {
     // MARK: Messages
 
     private func onMessage(_ type: String, _ message: Message) {
+        if !connectedLogged {
+            connectedLogged = true
+            RunLog.add("Bridge connected (first message: \(type))")
+        }
         if player?.handle(type, message) == true { return }
         switch type {
+        case "tvos-boot":
+            RunLog.add("Start-up script ran, \(Int(message.number("storageKeys") ?? -1)) keys in the page's storage")
+        case "tvos-status":
+            guard let status = PageStatus(message) else { return }
+            latestStatus = status
+            if status.rendered { RunLog.drew() }
+            fitPage(status)
         case "app-info":
             bridge.send(AppAnswers.appInfo(engine: engine))
         case "player-engine":
@@ -323,11 +343,48 @@ final class MainViewController: UIViewController {
         case "save-file":
             alert("Can't save files", "Apple TV has no files to save \(message.text("name") ?? "this") to.")
         case "web-error":
-            NSLog("[page] %@", message.text("message") ?? "")
+            RunLog.add("Page: \(message.text("message") ?? "")")
         default:
             // Downloads, watch-next, keyboard completions and the like have no Apple TV part.
             break
         }
+    }
+
+    // MARK: Zoom
+
+    /**
+     * Zooms the page so its layout width spans the screen. The web app lays a
+     * TV's page out 1280 wide and leaves the scaling to the web view, which
+     * UIWebView doesn't do reliably from the page's viewport. The page reports
+     * how wide it lays out and how much of that is on screen; the zoom changes
+     * by their ratio, which corrects itself whatever WebKit's zoom units are.
+     */
+    private func fitPage(_ status: PageStatus?) {
+        guard let scroll = web?.scrollView, view.bounds.width > 0 else { return }
+        let drawn = scroll.contentSize.width
+        let ratio: CGFloat
+        let why: String
+        if drawn > 1, drawn < view.bounds.width - 2 {
+            // Narrower than the screen: the page leaves a strip down the side.
+            ratio = view.bounds.width / drawn
+            why = "drawn \(Int(drawn)) pt wide on a \(Int(view.bounds.width)) pt screen"
+        } else if let status, status.layoutWidth > 0, status.visibleWidth > 0,
+                  abs(status.visibleWidth - status.layoutWidth) > 2 {
+            // More of the page on screen than it lays out: zoomed out.
+            ratio = CGFloat(status.visibleWidth / status.layoutWidth)
+            why = "laid out \(Int(status.layoutWidth)) wide, \(Int(status.visibleWidth)) on screen"
+        } else {
+            return
+        }
+        let target = min(4, max(0.5, scroll.zoomScale * ratio))
+        guard abs(target - scroll.zoomScale) > 0.01 else { return }
+        RunLog.add("Zoom \(String(format: "%.2f", scroll.zoomScale)) → \(String(format: "%.2f", target)): \(why)")
+        scroll.minimumZoomScale = min(scroll.minimumZoomScale, target)
+        scroll.maximumZoomScale = max(scroll.maximumZoomScale, target)
+        scroll.setZoomScale(target, animated: false)
+        scroll.minimumZoomScale = target
+        scroll.maximumZoomScale = target
+        scroll.contentOffset = CGPoint(x: 0, y: scroll.contentOffset.y)
     }
 
     // MARK: Presses

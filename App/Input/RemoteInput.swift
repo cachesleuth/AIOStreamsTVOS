@@ -9,6 +9,9 @@ import UIKit
 final class RemoteInput: NSObject {
     /// Sends `keydown` or `keyup` for a key name.
     var key: (_ type: String, _ key: String, _ repeat: Bool) -> Void = { _, _, _ in }
+    /// Play/Pause held for 2 seconds.
+    var heldPlayPause: () -> Void = {}
+    private var playPauseHold: Timer?
     /// The Menu/Back button; false lets tvOS have it, which leaves the app.
     var back: () -> Bool = { false }
     /// Select on a text field; true when it opened the keyboard instead.
@@ -46,6 +49,13 @@ final class RemoteInput: NSObject {
                     down(press.type, "GamepadA", repeats: false)
                 }
             default:
+                if press.type == .playPause {
+                    playPauseHold?.invalidate()
+                    playPauseHold = Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { [weak self] _ in
+                        self?.playPauseHold = nil
+                        self?.heldPlayPause()
+                    }
+                }
                 if let name = Self.names[press.type] {
                     down(press.type, name, repeats: Self.arrows.contains(name))
                 } else {
@@ -59,6 +69,10 @@ final class RemoteInput: NSObject {
     func pressesEnded(_ presses: Set<UIPress>) -> Set<UIPress> {
         var rest = Set<UIPress>()
         for press in presses {
+            if press.type == .playPause {
+                playPauseHold?.invalidate()
+                playPauseHold = nil
+            }
             if press.type == .select, consumedSelect {
                 consumedSelect = false
             } else if let name = held.removeValue(forKey: press.type) {

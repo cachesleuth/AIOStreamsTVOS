@@ -31,10 +31,16 @@ final class AppURLProtocol: URLProtocol {
         let file = root.appendingPathComponent(String(path.dropFirst())).standardizedFileURL
         // Nothing outside the bundled build.
         guard file.path.hasPrefix(root.path + "/"), var data = try? Data(contentsOf: file) else {
+            RunLog.add("Not found in the app: \(path)")
             return fail(404)
         }
+        if file.pathExtension.lowercased() == "css" {
+            data = Self.plainFocus(data)
+        }
         if file.lastPathComponent == "index.html" {
-            data = Self.inject(Self.bootScript(), into: data)
+            let script = Self.bootScript()
+            data = Self.inject(script, into: data)
+            RunLog.add("Served index.html (\(data.count / 1024) KB, start-up script \(script.utf8.count / 1024) KB)")
         }
         let headers = [
             "Content-Type": Self.mimeType(file.pathExtension),
@@ -55,6 +61,22 @@ final class AppURLProtocol: URLProtocol {
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data())
         client?.urlProtocolDidFinishLoading(self)
+    }
+
+    /**
+     * The page rings what has focus with `:focus-visible`, which UIWebView's
+     * WebKit leaves off: its parser drops every rule that names it, ring and
+     * all. With no pointer here, any focus is the remote's, so it becomes
+     * `:focus` before WebKit reads the file. An escaped `\:focus-visible` is
+     * part of a class name (Tailwind's `focus-visible:ring-1`) and stays.
+     */
+    private static let focusVisible = try! NSRegularExpression(pattern: "(?<!\\\\):focus-visible")
+
+    static func plainFocus(_ css: Data) -> Data {
+        guard let text = String(data: css, encoding: .utf8), text.contains(":focus-visible") else { return css }
+        let range = NSRange(text.startIndex..., in: text)
+        let replaced = focusVisible.stringByReplacingMatches(in: text, range: range, withTemplate: ":focus")
+        return Data(replaced.utf8)
     }
 
     /// Right after `<head>`, before the page's inline script that checks for the bridge.

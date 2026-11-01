@@ -11,7 +11,8 @@ enum JSContextHook {
     /// Called on the main thread with each message's JSON text.
     static var onMessage: ((String) -> Void)?
 
-    static func install(in context: JSContext) {
+    static func install(in context: JSContext, from source: String = "context callback") {
+        RunLog.add("Bridge hook installed (\(source))")
         let post: @convention(block) (String) -> Void = { text in
             let origin = JSContext.current()?
                 .evaluateScript("window.top === window ? location.host : ''")?

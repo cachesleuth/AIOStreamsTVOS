@@ -58,6 +58,20 @@ enum WebStorageMirror {
         UserDefaults.standard.removeObject(forKey: key)
     }
 
+    private static let clearKey = "aiostreams.clearWebStorage"
+
+    /// The next page start clears its storage first.
+    static func requestClear() {
+        UserDefaults.standard.set(true, forKey: clearKey)
+    }
+
+    /// Whether a clear was asked for, which only one page start acts on.
+    static func takeClearRequest() -> Bool {
+        let asked = UserDefaults.standard.bool(forKey: clearKey)
+        if asked { UserDefaults.standard.removeObject(forKey: clearKey) }
+        return asked
+    }
+
     static func save(_ items: Message) {
         var kept: [String: String] = [:]
         var total = 0

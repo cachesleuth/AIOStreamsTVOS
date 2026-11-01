@@ -76,11 +76,13 @@ final class WebViewDelegate: NSObject {
 
     @objc(webViewDidStartLoad:)
     func webViewDidStartLoad(_ webView: UIView) {
+        RunLog.add("Web view started loading")
         didStart()
     }
 
     @objc(webViewDidFinishLoad:)
     func webViewDidFinishLoad(_ webView: UIView) {
+        RunLog.add("Web view finished loading")
         didFinish()
     }
 
