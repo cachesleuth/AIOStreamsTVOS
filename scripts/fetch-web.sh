@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the AIOStreams web app's standalone build and copies it into App/web,
+# Builds the AIOStreams web app's standalone build and copies it into WebBuild,
 # which the app bundles. The AIOStreams repo itself is only read, never changed.
 #
 #   AIOSTREAMS_DIR=/path/to/AIOStreams bash scripts/fetch-web.sh   # use a local checkout as it is
@@ -31,7 +31,9 @@ fi
   pnpm -F @aiostreams/web build:standalone
 )
 
-rm -rf "$here/App/web"
-cp -R "$src/packages/web/dist-standalone" "$here/App/web"
-git -C "$src" rev-parse HEAD > "$here/App/web/aiostreams-commit.txt" 2>/dev/null || true
-echo "Copied the web app into App/web ($(cat "$here/App/web/aiostreams-commit.txt" 2>/dev/null || echo 'unknown commit'))"
+# Outside App/: macOS ignores case, so App/web would be App/Web, which holds Swift sources.
+out="$here/WebBuild"
+rm -rf "$out"
+cp -R "$src/packages/web/dist-standalone" "$out"
+git -C "$src" rev-parse HEAD > "$out/aiostreams-commit.txt" 2>/dev/null || true
+echo "Copied the web app into WebBuild ($(cat "$out/aiostreams-commit.txt" 2>/dev/null || echo 'unknown commit'))"

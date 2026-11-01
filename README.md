@@ -74,7 +74,7 @@ Needs a Mac with Xcode 16 or later, [XcodeGen](https://github.com/yonaskolb/Xcod
 with Corepack, and an Apple TV (or the tvOS simulator).
 
 ```sh
-bash scripts/fetch-web.sh       # clones AIOStreams into .build/ and builds the web app into App/web
+bash scripts/fetch-web.sh       # clones AIOStreams into .build/ and builds the web app into WebBuild
 xcodegen generate               # writes AIOStreamsTV.xcodeproj from project.yml
 open AIOStreamsTV.xcodeproj
 ```
@@ -119,7 +119,7 @@ This was written without a Mac, so none of it has run. In rough order of risk:
 | `App/Player`   | libmpv, the player messages, Now Playing and remote commands           |
 | `App/Input`    | The Siri Remote and the system keyboard                                |
 | `App/Support`  | Identity, folders, storage mirroring, mpv.conf, the app's own answers  |
-| `scripts`      | Building the web app into `App/web`                                    |
+| `scripts`      | Building the web app into `WebBuild` (git-ignored)                     |
 
 ## Licences
 

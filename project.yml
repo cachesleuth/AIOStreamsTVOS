@@ -22,10 +22,9 @@ targets:
       - path: App
         excludes:
           - Info.plist
-          - web
-          - web/**
-      # The web app's standalone build, from scripts/fetch-web.sh.
-      - path: App/web
+      # The web app's standalone build, from scripts/fetch-web.sh. Kept outside App:
+      # macOS ignores case in names, so App/web would be the same folder as App/Web.
+      - path: WebBuild
         type: folder
         buildPhase: resources
         optional: true

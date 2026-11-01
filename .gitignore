@@ -3,7 +3,7 @@
 *.xcworkspace/
 
 # The web app's build, from scripts/fetch-web.sh
-App/web/
+WebBuild/
 
 # Checkouts and build output
 .build/
