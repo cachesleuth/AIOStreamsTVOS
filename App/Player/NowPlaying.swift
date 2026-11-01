@@ -93,7 +93,12 @@ final class NowPlaying {
         ]
         guard on else {
             for command in commands { command.removeTarget(nil) }
+            UIApplication.shared.endReceivingRemoteControlEvents()
             return
+        }
+        UIApplication.shared.beginReceivingRemoteControlEvents()
+        for command in commands where command !== center.nextTrackCommand && command !== center.previousTrackCommand {
+            command.isEnabled = true
         }
         center.skipForwardCommand.preferredIntervals = [10]
         center.skipBackwardCommand.preferredIntervals = [10]

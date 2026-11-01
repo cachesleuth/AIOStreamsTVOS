@@ -60,6 +60,9 @@ final class MPVEngine {
             ("target-colorspace-hint", "yes"),
             // audiounit keeps video timed to the HDMI output's real clock.
             ("ao", "audiounit"),
+            // Without it audiounit makes the audio session mixable, and tvOS gives Now Playing
+            // and the remote's media commands only to an app whose audio doesn't mix.
+            ("audio-exclusive", "yes"),
             ("audio-client-name", "AIOStreams"),
             ("config", "yes"),
             ("config-dir", configDir.path),
