@@ -22,7 +22,7 @@ cache="$here/.build/mpvkit"
 zip="$cache/MPVKit-$version.zip"
 mkdir -p "$cache"
 if [ ! -f "$zip" ]; then
-  echo "Downloading MPVKit $version…"
+  echo "Downloading MPVKit ${version}..."
   curl -fL --retry 3 -o "$zip.part" "$url"
   mv "$zip.part" "$zip"
 fi
