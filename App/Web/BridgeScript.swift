@@ -48,6 +48,26 @@ enum BridgeScript {
   try {
     Object.defineProperty(window, 'devicePixelRatio', { get: () => 1, configurable: true });
   } catch {}
+  /*
+   * On a TV the page eases keyed scrolling by sliding the page, or a row of
+   * cards, in nested layers (`data-glide-layer`), one animation per key
+   * press. A held key repeats about nine times a second, so scrolling fast
+   * keeps several page-sized slides running at once, and WebKit draws the
+   * rows they bring in ahead of time while they run: the likely reason the
+   * home and discover pages ran its process out of memory when scrolled
+   * fast. A held key's repeats now jump to each row instead of sliding; a
+   * single press still slides.
+   */
+  let held = false;
+  let lastDown = 0;
+  try {
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (keyframes, options) {
+      if (held && this.hasAttribute && this.hasAttribute('data-glide-layer'))
+        return animate.call(this, keyframes, { duration: 0 });
+      return animate.call(this, keyframes, options);
+    };
+  } catch {}
   // The page's saved copies of artwork come back as blob URLs too.
   try {
     localStorage.setItem('aiostreams-web-cache-artwork', 'false');
@@ -191,6 +211,10 @@ enum BridgeScript {
           });
           return;
         }
+        // A held key, or presses as quick as one, such as a fast swipe on the clickpad.
+        const now = performance.now();
+        held = !!repeat || now - lastDown < 150;
+        lastDown = now;
         key('keydown', name, repeat);
       },
       up(name) {

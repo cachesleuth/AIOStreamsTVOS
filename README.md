@@ -69,6 +69,11 @@ The page asks for artwork at its device pixel ratio, which tvOS reports as 2 on 
 ratio of 1, so artwork comes at 1080p sizes, as tvOS's own apps draw it. The app menu (hold
 Play/Pause) shows the app's memory and when the page last reloaded.
 
+Scrolling fast through the home and discover pages ran it out of memory too, most likely because
+the page slides the whole page in layers for each key press, and a held key's repeats kept
+several slides running. The bridge script lets a held key's repeats, and presses as quick as them, jump to each
+row instead; a single press still slides.
+
 ### Posing as the Android TV app
 
 The web app picks its behaviour from the bridge's `platform`, and only knows `android`, `windows`,
@@ -79,7 +84,8 @@ Back behaviour and the bundled-player path. It also means:
 - Jellyfin lists the device as **AIOStreams Android TV**.
 - Settings shows an **Android app** section. Its mpv.conf editor works; updates show as off.
 - Android-only playback settings (frame rate matching, tunnelling) show and do nothing.
-- The statistics overlay shows nothing: it needs mpv's Lua scripts, which tvOS's libmpv lacks.
+- mpv's statistics overlay is a Lua script, which tvOS's libmpv lacks, so the app draws its own
+  from mpv's properties: the same pages (Playback, Frame timings, Cache, Tracks), as plain text.
 
 ## The remote
 
