@@ -1,14 +1,22 @@
-# Builds the app for the tvOS simulator, unsigned, to check that it compiles.
+# Builds the app for Apple TV hardware, unsigned, and packs it as an .ipa.
+# Every run attaches it as an artifact; a push to main also replaces the
+# rolling "nightly" release, and a v* tag publishes a release of its own.
+# The .ipa has to be signed with your own Apple ID before an Apple TV installs it.
 name: Build
 
 on:
   push:
+    branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
     inputs:
       aiostreams_ref:
         description: AIOStreams branch or tag to take the web app from
         default: main
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -32,11 +40,52 @@ jobs:
           brew install xcodegen
           xcodegen generate
 
-      - name: Build
+      - name: Build for Apple TV
         run: |
           xcodebuild build \
             -project AIOStreamsTV.xcodeproj \
             -scheme AIOStreamsTV \
-            -destination 'generic/platform=tvOS Simulator' \
+            -configuration Release \
+            -destination 'generic/platform=tvOS' \
             -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Pack the .ipa
+        run: |
+          app="build/Build/Products/Release-appletvos/AIOStreams.app"
+          test -d "$app" || { echo "No app at $app"; ls -R build/Build/Products; exit 1; }
+          rm -rf Payload AIOStreams.ipa
+          mkdir Payload
+          cp -R "$app" Payload/
+          zip -qry AIOStreams.ipa Payload
+          ls -lh AIOStreams.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AIOStreams-tvOS-ipa
+          path: AIOStreams.ipa
+          if-no-files-found: error
+
+      - name: Publish the nightly release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete nightly --yes --cleanup-tag || true
+          gh release create nightly AIOStreams.ipa \
+            --title "Nightly" \
+            --notes "Unsigned build of ${GITHUB_SHA::8}. Sign it with your own Apple ID to install." \
+            --prerelease \
+            --target "$GITHUB_SHA"
+
+      - name: Publish the tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" AIOStreams.ipa \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Unsigned build. Sign it with your own Apple ID to install." \
+            --verify-tag

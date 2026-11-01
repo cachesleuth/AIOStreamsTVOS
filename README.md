@@ -89,7 +89,15 @@ opening after 7 days; a paid account's last a year.
 Turn off Metal API Validation (Product → Scheme → Edit Scheme → Run → Diagnostics): MoltenVK trips it
 on HDR video. See [KhronosGroup/MoltenVK#2226](https://github.com/KhronosGroup/MoltenVK/issues/2226).
 
-The GitHub Actions workflow builds for the simulator on each push, unsigned, to check it compiles.
+### Without a Mac
+
+The GitHub Actions workflow builds an unsigned `AIOStreams.ipa` for Apple TV hardware. Every run
+attaches it to the run as an artifact. Each push to `main` replaces the **Nightly** release, and
+pushing a `v*` tag (e.g. `v0.1.0`) publishes a release of its own.
+
+An Apple TV only installs apps signed for it, so the `.ipa` has to be signed with your own Apple ID
+before it installs. A sideloading tool that handles Apple TV can do that from Windows; with a free
+Apple ID the signature lasts 7 days, with a paid developer account a year.
 
 ## What isn't known yet
 
