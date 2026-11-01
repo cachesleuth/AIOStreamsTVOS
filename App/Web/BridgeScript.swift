@@ -63,9 +63,22 @@ enum BridgeScript {
     ':not([type=image]):not([type=radio]):not([type=range]):not([type=reset]):not([type=submit]),' +
     ' textarea, [contenteditable=""], [contenteditable=true]';
   function editing() { return document.querySelector('[data-tvos-editing]'); }
+  function isField(el) {
+    return !!el && !!el.matches && el.matches(TEXT_FIELD) && !el.disabled;
+  }
   window.__aiostreamsEditField = function () {
     var el = document.activeElement;
-    if (!el || !el.matches || !el.matches(TEXT_FIELD) || el.disabled || el.readOnly) return '';
+    if (!isField(el)) return '';
+    if (el.readOnly) {
+      // The web app's Android TV mode keeps a focused field read-only until
+      // Select, which it reads as Enter (src/lib/tv.ts). Enter releases it.
+      el.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Enter', code: 'Enter', bubbles: true, cancelable: true
+      }));
+      el = document.activeElement;
+      // Still read-only: a field nothing may be typed into.
+      if (!isField(el) || el.readOnly) return '';
+    }
     var old = editing();
     if (old) old.removeAttribute('data-tvos-editing');
     el.setAttribute('data-tvos-editing', '');

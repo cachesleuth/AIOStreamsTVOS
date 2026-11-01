@@ -159,7 +159,7 @@ final class MainViewController: UIViewController {
             self?.web?.evaluate("window.__aiostreamsEndEdit && __aiostreamsEndEdit()")
             self?.becomeFirstResponder()
         }
-        keyboard.attach(to: view)
+        keyboard.attach(to: self)
     }
 
     private func observeLifecycle() {

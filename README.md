@@ -113,8 +113,9 @@ This was written without a Mac, so none of it has run. In rough order of risk:
 4. **Storage.** tvOS can clear an app's caches, web storage included. The app copies localStorage
    into the user defaults (up to about 400 KB, values over 64 KB left out) and restores missing keys
    at start, so sign-ins and settings survive. IndexedDB caches don't, and may not exist in UIWebView.
-5. **The keyboard.** It opens by giving an off-screen text field first responder; if tvOS won't
-   show the keyboard for it, this needs another route.
+5. **The keyboard.** Select on a field opens a native text-entry screen over the page. The web
+   app's Android TV mode keeps focused fields read-only until Select (`src/lib/tv.ts`), so the app
+   sends the page an Enter first to unlock the field.
 6. **Swipe sensitivity** (`RemoteInput.swipeStep`) is a guess.
 7. **MPVKit** describes itself as not production quality. HDR passthrough isn't set up.
 
