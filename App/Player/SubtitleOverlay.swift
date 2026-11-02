@@ -189,7 +189,7 @@ final class SubtitleOverlay: UIView {
             left: pixels(picture.minX - bounds.minX),
             right: pixels(bounds.maxX - picture.maxX),
             useMargins: cropped,
-            // 20% under the file's sizes, as the overlay's own text is under mpv's.
+            // 20% under the file's sizes, which read large on a TV.
             fontScale: (look?.scale ?? 1) * 0.8
         )
         let milliseconds = Int64(((time - delay) * 1000).rounded())
@@ -311,9 +311,10 @@ final class SubtitleOverlay: UIView {
         }
     }
 
-    /// Sizes at sub-scale 1, in units of a 720-line screen: mpv's 55-unit font made 20% smaller,
-    /// which reads better on a TV; the margin is mpv's.
-    private static let fontUnits: CGFloat = 44
+    /// Sizes at sub-scale 1, in units of a 720-line screen: 36 units is 5% of the screen's height,
+    /// the size the page's own player draws its subtitles at (`scale * 5vh`), so a setting means the
+    /// same size in both; the margin is mpv's.
+    private static let fontUnits: CGFloat = 36
     private static let marginUnits: CGFloat = 22
 
     /// One unit of a 720-line screen. Sized to the screen, not the picture, as mpv's `sub-scale-by-window`
@@ -354,7 +355,9 @@ final class SubtitleOverlay: UIView {
         let back = NSMutableAttributedString()
         for run in runs {
             var traits: UIFontDescriptor.SymbolicTraits = []
-            if run.bold || look?.bold == true { traits.insert(.traitBold) }
+            // The page's style, when forced, decides the weight too: a cue's own bold made some tracks
+            // heavier and larger-looking than the rest at the same size.
+            if (run.bold && !forced) || look?.bold == true { traits.insert(.traitBold) }
             if run.italic && !forced { traits.insert(.traitItalic) }
             var font = UIFont.systemFont(ofSize: size, weight: traits.contains(.traitBold) ? .bold : .medium)
             if traits.contains(.traitItalic), let italic = font.fontDescriptor.withSymbolicTraits(traits) {
