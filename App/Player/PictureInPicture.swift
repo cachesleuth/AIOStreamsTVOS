@@ -1,5 +1,5 @@
 import AetherHost
-import AVKit
+@preconcurrency import AVKit
 import UIKit
 
 /**
@@ -87,7 +87,7 @@ final class PictureInPicture: NSObject {
         Self.trace = []
         // In steps: as one expression, the compiler can give up type-checking it.
         let mode: String = inVideoMode ? "the video switched the TV" : "the TV is in the Home screen's mode"
-        let hasCriteria: Bool = window()?.avDisplayManager?.preferredDisplayCriteria != nil
+        let hasCriteria: Bool = window()?.avDisplayManager.preferredDisplayCriteria != nil
         let criteria: String = hasCriteria ? "has display criteria" : "no display criteria"
         step("button pressed; " + mode + ", " + criteria)
         // Made now, so tvOS weighs up the window during the switch rather than after it.
