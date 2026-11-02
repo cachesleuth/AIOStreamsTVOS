@@ -172,6 +172,25 @@ enum BridgeScript {
   };
   let editing = null;
   let swallowed = false;
+  /*
+   * A searchable list, such as Discover's catalog picker: its search field
+   * keeps focus while Up and Down move a highlight through the list
+   * (aria-activedescendant, or cmdk's highlighted item), and Enter picks the
+   * highlighted entry. Once the list has been moved through, Enter there
+   * goes to the page to pick; straight away, it opens the keyboard to search.
+   */
+  let movedIn = null;
+  const listField = (el) =>
+    !!el &&
+    (el.hasAttribute('aria-activedescendant') ||
+      el.hasAttribute('cmdk-input') ||
+      el.getAttribute('role') === 'combobox');
+  const highlighted = (el) => {
+    const id = el.getAttribute('aria-activedescendant');
+    if (id && document.getElementById(id)) return true;
+    const list = el.closest('[cmdk-root]');
+    return !!list?.querySelector('[cmdk-item][data-selected=true], [cmdk-item][aria-selected=true]');
+  };
 
   const key = (type, name, repeat) =>
     target().dispatchEvent(
@@ -188,8 +207,11 @@ enum BridgeScript {
     value: Object.freeze({
       down(name, repeat) {
         const el = target();
+        if (name === 'ArrowUp' || name === 'ArrowDown') movedIn = listField(el) ? el : null;
+        else if (name !== 'Enter') movedIn = null;
+        const picks = name === 'Enter' && movedIn === el && listField(el) && highlighted(el);
         // tvOS has no keyboard for a web page, so the app shows its own.
-        if (name === 'Enter' && isTextField(el)) {
+        if (name === 'Enter' && isTextField(el) && !picks) {
           if (repeat) return;
           editing = el;
           swallowed = true;
@@ -216,6 +238,7 @@ enum BridgeScript {
         const now = performance.now();
         held = !!repeat || now - lastDown < 150;
         lastDown = now;
+        if (picks) movedIn = null;
         key('keydown', name, repeat);
       },
       up(name) {
