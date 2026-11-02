@@ -74,7 +74,10 @@ final class MainViewController: UIViewController, RemoteReceiver {
         NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MemoryLog.warning(playing: self?.player?.playing == true)
+            // Delivered on the main queue.
+            MainActor.assumeIsolated {
+                MemoryLog.warning(playing: self?.player?.playing == true)
+            }
         }
         web.onOpenURL = { [weak self] in self?.open($0) }
         web.onServed = { path, status, _ in
