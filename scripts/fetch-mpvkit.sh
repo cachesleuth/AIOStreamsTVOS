@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
-# Downloads the MPVKit build into Vendor/MPVKit.xcframework: libmpv, FFmpeg and
-# their dependencies as one static framework, with the vo_avfoundation video
-# output that hands HDR10 and HLG to the TV. It is Streamyfin's 0.41.0-av5 (the
-# build the working aiostreams-tvos project uses) from the aiostreams-hdr10plus
-# branch of mickey2266/MPVKit, which adds one patch: vo_avfoundation passes each
-# frame's HDR10+ dynamic metadata to the display layer with the frame.
-# Checked against its SHA-256.
+# Downloads Streamyfin's MPVKit build into Vendor/MPVKit.xcframework: libmpv,
+# FFmpeg and their dependencies as one static framework, with the
+# vo_avfoundation video output that hands HDR10 and HLG to the TV. The same
+# build the working aiostreams-tvos project uses. Checked against its SHA-256.
 set -euo pipefail
 
-version="0.41.0-av5-hdr10plus"
-sha256="60bf4471c8b948dba33226a18e241546943579bce3932ec7e16d6804de49196c"
-url="https://github.com/mickey2266/MPVKit/releases/download/$version/MPVKit.xcframework.zip"
+version="0.41.0-av5"
+sha256="80a79fbb34b1a3ae84744fe7bb9d365d2a006a5f617460933b7ce777251d3618"
+url="https://github.com/streamyfin/MPVKit/releases/download/$version/MPVKit.xcframework.zip"
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
 out="$here/Vendor/MPVKit.xcframework"

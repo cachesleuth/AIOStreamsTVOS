@@ -38,10 +38,9 @@ page the same way:
   Page to app goes through `webkit.messageHandlers.aiostreamsNative`; app to page through
   `evaluateJavaScript`, which never blocks the app.
 - **mpv** comes from Streamyfin's [MPVKit](https://github.com/streamyfin/MPVKit) build (GPL), the
-  one the working aiostreams-tvos project uses, as rebuilt on the `aiostreams-hdr10plus` branch of
-  [mickey2266/MPVKit](https://github.com/mickey2266/MPVKit/tree/aiostreams-hdr10plus) with one
-  patch for HDR10+, fetched by `scripts/fetch-mpvkit.sh`. Its `vo_avfoundation` output hands
-  VideoToolbox's frames to an `AVSampleBufferDisplayLayer` with their HDR metadata. `MPVEngine` and `PlayerChannel` otherwise follow AIOStreams' Android `MpvEngine` and
+  one the working aiostreams-tvos project uses, fetched by `scripts/fetch-mpvkit.sh`. Its
+  `vo_avfoundation` output hands VideoToolbox's frames to an `AVSampleBufferDisplayLayer` with their
+  HDR metadata. `MPVEngine` and `PlayerChannel` otherwise follow AIOStreams' Android `MpvEngine` and
   `PlayerChannel`: the same observed properties and messages.
 
 ### HDR and Dolby Vision
@@ -50,12 +49,6 @@ page the same way:
   matching TV mode (HDR10, HLG or SDR) at the video's frame rate, and goes back to the TV's own mode
   when playback ends. tvOS only switches with **Settings → Video and Audio → Match Content**
   (Dynamic Range, and Frame Rate if you want that too) turned on.
-- **HDR10+** plays as HDR10 with its dynamic metadata. FFmpeg reads each frame's HDR10+ metadata,
-  and the patched `vo_avfoundation` attaches it to the frame's sample buffer
-  (`kCMSampleAttachmentKey_HDR10PlusPerFrameData`), so tvOS can pass it to a TV that takes HDR10+.
-  The app still asks tvOS for the HDR10 mode; it doesn't ask for an HDR10+ one. It needs an Apple
-  TV and a TV that both take HDR10+. The app menu and the diagnostics say whether any HDR10+
-  metadata has gone to the TV since launch.
 - **Dolby Vision** plays through its HDR10 base layer, so the TV shows HDR10, not Dolby Vision.
   That covers profile 8 (most streaming releases) and profile 7 (UHD Blu-ray remuxes). Real Dolby
   Vision output on Apple TV only comes from Apple's own player, which can't play what mpv plays.
@@ -155,7 +148,7 @@ On a Mac with Xcode 16 or later, [XcodeGen](https://github.com/yonaskolb/XcodeGe
 
 ```sh
 bash scripts/fetch-web.sh       # clones AIOStreams into .build/ and builds the web app into WebBuild
-bash scripts/fetch-mpvkit.sh    # downloads the HDR10+ MPVKit build (250 MB) into Vendor/, checked by SHA-256
+bash scripts/fetch-mpvkit.sh    # downloads Streamyfin's MPVKit (250 MB) into Vendor/, checked by SHA-256
 xcodegen generate               # writes AIOStreamsTV.xcodeproj from project.yml
 open AIOStreamsTV.xcodeproj
 ```

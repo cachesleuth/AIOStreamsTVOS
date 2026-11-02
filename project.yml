@@ -58,7 +58,7 @@ targets:
       - target: AIOStreamsTopShelf
         embed: true
       - sdk: TVServices.framework
-      # Streamyfin's MPVKit with vo_avfoundation for HDR, rebuilt with HDR10+; from scripts/fetch-mpvkit.sh.
+      # Streamyfin's MPVKit, with vo_avfoundation for HDR; from scripts/fetch-mpvkit.sh.
       - framework: Vendor/MPVKit.xcframework
         embed: false
       - sdk: MediaPlayer.framework
