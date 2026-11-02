@@ -88,6 +88,9 @@ enum TopShelfStore {
             .max { $0.1 < $1.1 }?.0
     }
 
+    /// Why the last write into a group failed, for the app menu.
+    private(set) static var lastError: String?
+
     /// Into every group; true if at least one took it.
     private static func write(_ data: Data, as name: String) -> Bool {
         var wrote = false
@@ -97,9 +100,13 @@ enum TopShelfStore {
                 try data.write(to: folder.appendingPathComponent(name), options: .atomic)
                 wrote = true
             } catch {
-                NSLog("[top-shelf] writing %@ to %@: %@", name, folder.path, error.localizedDescription)
+                let reason = (error as NSError).underlyingErrors.first.map { "\($0.localizedDescription)" }
+                    ?? error.localizedDescription
+                lastError = "\((error as NSError).code): \(reason)"
+                NSLog("[top-shelf] writing %@ to %@: %@", name, folder.path, String(describing: error))
             }
         }
+        if wrote { lastError = nil }
         return wrote
     }
 

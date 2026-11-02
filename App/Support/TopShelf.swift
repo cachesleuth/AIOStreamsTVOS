@@ -59,6 +59,9 @@ enum TopShelf {
         } else {
             extensionGroups = bundled ? "no profile in it" : "-"
         }
+        let appProfile = provisionedGroups(in: Bundle.main.bundleURL)
+            .map { "\($0.count) App Groups, \(Set($0).intersection(TopShelfStore.entitled).count) of the app's" }
+            ?? "none"
         let time = { (date: Date) in DateFormatter.localizedString(from: date, dateStyle: .none, timeStyle: .medium) }
         let page = received.map {
             "\($0.count) titles at \(time($0.date))\($0.saved ? "" : ", not saved")"
@@ -72,6 +75,7 @@ enum TopShelf {
             "Top Shelf extension: \(bundled ? "in the app" : "missing"); \(extensionGroups)",
             "Top Shelf asked: \(asked)",
             "Top Shelf list: \(page); saved \(TopShelfStore.load().count)",
+            "App's profile: \(appProfile)" + (TopShelfStore.lastError.map { "; write error \($0)" } ?? ""),
         ]
     }
 
