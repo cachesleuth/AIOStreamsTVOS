@@ -189,6 +189,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
             self.player = player
             let pip = PictureInPicture(player: engine, channel: player, send: { [weak self] in self?.sendToPage($0) })
             pip.failed = { [weak self] in self?.flashStatus($0) }
+            pip.window = { [weak self] in self?.view.window }
             pip.ended = { [weak self] in
                 self?.web?.focusPage()
                 self?.updatePipButton()

@@ -135,6 +135,12 @@ the bridge script adds the button to the page's controls, in the look of the pag
 - Text subtitles show in the window through the engine's native subtitle rendition
   (`prepareNativeSubtitles`), selected only while the window shows; picture subtitles (PGS, DVD)
   and ASS styling don't, as the app's overlay can't leave the app.
+- An HDR video, or one at its own frame rate, has the TV in a mode of its own, and tvOS gives the
+  Home screen its mode back when the window opens. Done there, in the background, that switch left
+  the window's video paused for good, so the app switches first: it drops the engine's display
+  criteria, waits for the TV to settle (the screen goes black for about 2 seconds, in the app),
+  plays the video again if the switch paused it, then opens the window. The criteria go back when
+  the video returns to the app.
 - Opening the app again, or the window's full-screen button, puts the video back in the app.
   Closing the window pauses the video, as on Android.
 - The app has the `audio` background mode, which tvOS needs to keep playing in the window, and the

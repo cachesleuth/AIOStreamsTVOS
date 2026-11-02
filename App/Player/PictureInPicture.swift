@@ -65,10 +65,30 @@ final class PictureInPicture: NSObject {
      */
     func start() {
         guard supported else { return failed("This Apple TV has no picture-in-picture.") }
-        guard let layer = player.engine.nativePlayerLayer else {
+        guard player.engine.nativePlayerLayer != nil else {
             return failed("Picture-in-picture isn't available for this video.")
         }
-        guard !active, waiting == nil else { return }
+        guard !active, waiting == nil, !switchingMode else { return }
+        // The engine's HDR or frame-rate mode goes first, in the app, where a paused video can be played
+        // again; the window then opens on the Home screen's own mode, so tvOS has nothing to switch.
+        guard let manager = window()?.avDisplayManager, let criteria = manager.preferredDisplayCriteria else {
+            return openWindow()
+        }
+        heldCriteria = criteria
+        let resume = player.engine.state == .playing
+        manager.preferredDisplayCriteria = nil
+        settleDisplayMode(manager, resume: resume) { [weak self] in
+            guard let self else { return }
+            guard self.channel.playing else { return self.putBackDisplayMode() }
+            self.openWindow()
+        }
+    }
+
+    private func openWindow() {
+        guard let layer = player.engine.nativePlayerLayer else {
+            putBackDisplayMode()
+            return failed("Picture-in-picture isn't available for this video.")
+        }
         // The layer is the session's: a new video has a new one, so a new controller.
         if controller?.playerLayer !== layer {
             guard let made = AVPictureInPictureController(playerLayer: layer) else {
@@ -88,6 +108,7 @@ final class PictureInPicture: NSObject {
                 guard let self, self.waiting != nil else { return }
                 self.endWaiting()
                 NSLog("[pip] tvOS didn't allow the window in time")
+                self.putBackDisplayMode()
                 self.failed("Picture-in-picture isn't available for this video right now.")
             }
         }
@@ -109,7 +130,10 @@ final class PictureInPicture: NSObject {
 
     func stop() {
         // Still waiting for tvOS to allow it: the press is dropped.
-        if waiting != nil { endWaiting() }
+        if waiting != nil {
+            endWaiting()
+            putBackDisplayMode()
+        }
         guard active else { return }
         restoring = true
         controller?.stopPictureInPicture()
@@ -123,10 +147,66 @@ final class PictureInPicture: NSObject {
 
     /// Back in the app, the video comes back with it.
     func appDidBecomeActive() {
+        // The window closed while the app was away: the video's mode comes back with the app.
+        if !active, !left { putBackDisplayMode() }
         guard left else { return }
         left = false
         stop()
     }
+
+    // MARK: The display mode
+
+    /// The window the video plays in, whose display manager holds the engine's HDR or frame-rate mode.
+    var window: () -> UIWindow? = { nil }
+    /// The engine's display criteria, held while the window shows and put back when the video returns.
+    private var heldCriteria: AVDisplayCriteria?
+    private var modeWatch: Timer?
+    private var switchSeen = false
+    private var switchingMode: Bool { modeWatch != nil }
+
+    /**
+     * An HDR video, or one at its own frame rate, has the TV in a mode of its
+     * own. tvOS gives the Home screen back its mode when the window opens, and
+     * that switch, in the background, left the window's video paused for good.
+     * So the app switches first, in the app, waits for the TV to settle, and
+     * plays the video again if the switch paused it.
+     */
+    private func settleDisplayMode(_ manager: AVDisplayManager, resume: Bool, then: @escaping () -> Void) {
+        modeWatch?.invalidate()
+        switchSeen = false
+        let began = CACurrentMediaTime()
+        modeWatch = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard let self else { return timer.invalidate() }
+                let elapsed = CACurrentMediaTime() - began
+                if manager.isDisplayModeSwitchInProgress { self.switchSeen = true }
+                // A switch starts within a second of the write, or there is none (the modes matched).
+                let settled = self.switchSeen ? !manager.isDisplayModeSwitchInProgress : elapsed > 1
+                guard settled || elapsed > Self.switchTime else { return }
+                timer.invalidate()
+                self.modeWatch = nil
+                if resume, self.channel.playing, self.player.engine.state != .playing {
+                    NSLog("[pip] the display mode switch paused the video; playing it again")
+                    self.channel.change(Change(paused: false))
+                }
+                then()
+            }
+        }
+    }
+
+    /// Back to the video's own mode, once it's in the app again.
+    private func putBackDisplayMode() {
+        guard let criteria = heldCriteria else { return }
+        heldCriteria = nil
+        // A video the page closed has no mode to go back to; the engine reset it on stopping.
+        guard channel.playing, let manager = window()?.avDisplayManager else { return }
+        let resume = player.engine.state == .playing
+        manager.preferredDisplayCriteria = criteria
+        settleDisplayMode(manager, resume: resume) {}
+    }
+
+    /// The longest a switch is waited for: a dynamic-range switch takes about 3 seconds.
+    private static let switchTime: CFTimeInterval = 8
 }
 
 // MARK: AVPictureInPictureControllerDelegate
@@ -161,6 +241,7 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
             NSLog("[pip] didn't start: %@", reason)
             endWaiting()
             player.setPictureInPicture(false)
+            putBackDisplayMode()
             failed("Picture-in-picture didn't start: \(reason)")
         }
     }
@@ -180,6 +261,8 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
             if !restoring { channel.change(Change(paused: true)) }
             restoring = false
             left = false
+            // In the app again, the video's mode comes back; closed out on the Home screen, it waits for the app.
+            if UIApplication.shared.applicationState != .background { putBackDisplayMode() }
             send(["type": "pip", "value": false])
             ended()
         }
