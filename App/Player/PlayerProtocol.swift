@@ -78,6 +78,10 @@ struct PlayerSettings: Equatable {
     /// The page's Automatic: whatever the output takes, which on an Apple TV is decided by tvOS.
     var passthroughAuto = false
     var audioDelayMs = 0.0
+    /// Gain on the dialogue in dB, 0 for none.
+    var dialogueBoost = 0.0
+    /// Evens out loud and quiet scenes.
+    var nightMode = false
     /// Megabytes of the stream to hold, 0 for the app's default.
     var cacheMb = 0
 }
@@ -157,6 +161,8 @@ enum PlayerProtocol {
                 .filter { passthroughFormats.contains($0) } ?? []
         }
         settings.audioDelayMs = message.number("audioDelayMs") ?? 0
+        settings.dialogueBoost = max(0, message.number("dialogueBoost") ?? 0)
+        settings.nightMode = message.flag("nightMode") == true
         settings.cacheMb = Int(message.number("cacheMb") ?? 0)
         return settings
     }

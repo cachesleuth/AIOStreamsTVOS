@@ -162,13 +162,20 @@ final class AetherPlayer {
         return options
     }
 
-    /// The page's channel limit. Shaping needs the decoded sound, so it costs Atmos; 7.1 and Automatic shape nothing.
+    /// The page's channel limit, dialogue boost and night mode. Shaping needs the decoded sound, so any of them
+    /// costs passthrough and Atmos; 7.1 and Automatic with no boost and night mode off shape nothing.
     private var shaping: AudioShaping {
+        let maxChannels: Int?
         switch settings.audioChannels {
-        case "stereo": return AudioShaping(maxChannels: 2)
-        case "5.1": return AudioShaping(maxChannels: 6)
-        default: return AudioShaping()
+        case "stereo": maxChannels = 2
+        case "5.1": maxChannels = 6
+        default: maxChannels = nil
         }
+        return AudioShaping(
+            maxChannels: maxChannels,
+            dialogueGainDB: settings.dialogueBoost,
+            compressor: settings.nightMode ? .night : nil
+        )
     }
 
     private func loaded(_ request: LoadRequest) {
@@ -281,7 +288,10 @@ final class AetherPlayer {
         guard current != nil, !ended else { return }
         // The rest is read at the next load.
         if next.audioDelayMs != old.audioDelayMs { engine.setAudioDelay(next.audioDelayMs / 1000) }
-        if next.audioChannels != old.audioChannels { engine.setAudioShaping(shaping) }
+        if next.audioChannels != old.audioChannels || next.dialogueBoost != old.dialogueBoost
+            || next.nightMode != old.nightMode {
+            engine.setAudioShaping(shaping)
+        }
     }
 
     private func applyVolume() {
