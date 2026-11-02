@@ -46,7 +46,21 @@ final class PictureInPicture: NSObject {
         self.channel = channel
         self.send = send
         super.init()
+        // Which mode the TV is in: a switch while a video is loaded is to the video's own mode,
+        // one with none loaded is back to the Home screen's, as the engine resets it on stopping.
+        modeObserver = NotificationCenter.default.addObserver(
+            forName: .AVDisplayManagerModeSwitchStart, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.switchingMode, self.heldCriteria == nil else { return }
+                self.inVideoMode = self.channel.playing
+            }
+        }
     }
+
+    private var modeObserver: NSObjectProtocol?
+    /// The TV switched to a mode for the video, so it isn't in the Home screen's.
+    private var inVideoMode = false
 
     private let supported = AVPictureInPictureController.isPictureInPictureSupported()
 
@@ -69,9 +83,15 @@ final class PictureInPicture: NSObject {
             return failed("Picture-in-picture isn't available for this video.")
         }
         guard !active, waiting == nil, !switchingMode else { return }
+        // Made now, so tvOS weighs up the window during the switch rather than after it.
+        guard prepareController() != nil else {
+            return failed("Picture-in-picture isn't available for this video.")
+        }
         // The engine's HDR or frame-rate mode goes first, in the app, where a paused video can be played
         // again; the window then opens on the Home screen's own mode, so tvOS has nothing to switch.
-        guard let manager = window()?.avDisplayManager, let criteria = manager.preferredDisplayCriteria else {
+        // A video that left the TV in the Home screen's mode opens the window straight away.
+        guard inVideoMode, let manager = window()?.avDisplayManager,
+              let criteria = manager.preferredDisplayCriteria else {
             return openWindow()
         }
         heldCriteria = criteria
@@ -84,21 +104,23 @@ final class PictureInPicture: NSObject {
         }
     }
 
+    /// The controller for the session's layer: a new video has a new layer, so a new controller.
+    private func prepareController() -> AVPictureInPictureController? {
+        guard let layer = player.engine.nativePlayerLayer else { return nil }
+        if let controller, controller.playerLayer === layer { return controller }
+        guard let made = AVPictureInPictureController(playerLayer: layer) else { return nil }
+        made.delegate = self
+        controller = made
+        return made
+    }
+
     private func openWindow() {
-        guard let layer = player.engine.nativePlayerLayer else {
+        guard let controller = prepareController() else {
             putBackDisplayMode()
             return failed("Picture-in-picture isn't available for this video.")
         }
-        // The layer is the session's: a new video has a new one, so a new controller.
-        if controller?.playerLayer !== layer {
-            guard let made = AVPictureInPictureController(playerLayer: layer) else {
-                return failed("Picture-in-picture isn't available for this video.")
-            }
-            made.delegate = self
-            controller = made
-        }
-        guard let controller else { return }
         if controller.isPictureInPicturePossible { return begin(controller) }
+        NSLog("[pip] waiting for tvOS to allow the window")
         possible = controller.observe(\.isPictureInPicturePossible, options: [.new]) { [weak self] controller, _ in
             guard controller.isPictureInPicturePossible else { return }
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.begin(controller) } }
@@ -118,6 +140,7 @@ final class PictureInPicture: NSObject {
 
     private func begin(_ controller: AVPictureInPictureController) {
         guard controller === self.controller, !controller.isPictureInPictureActive else { return }
+        if waiting != nil { NSLog("[pip] tvOS allowed the window") }
         endWaiting()
         controller.startPictureInPicture()
     }
@@ -173,26 +196,43 @@ final class PictureInPicture: NSObject {
      */
     private func settleDisplayMode(_ manager: AVDisplayManager, resume: Bool, then: @escaping () -> Void) {
         modeWatch?.invalidate()
+        if let switchEnd { NotificationCenter.default.removeObserver(switchEnd) }
+        switchEnd = nil
         switchSeen = false
         let began = CACurrentMediaTime()
-        modeWatch = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] timer in
+        let finish: @MainActor (String) -> Void = { [weak self] how in
+            guard let self, self.modeWatch != nil else { return }
+            self.modeWatch?.invalidate()
+            self.modeWatch = nil
+            if let observer = self.switchEnd { NotificationCenter.default.removeObserver(observer) }
+            self.switchEnd = nil
+            NSLog("[pip] display mode %@ after %.2f s", how, CACurrentMediaTime() - began)
+            if resume, self.channel.playing, self.player.engine.state != .playing {
+                NSLog("[pip] the display mode switch paused the video; playing it again")
+                self.channel.change(Change(paused: false))
+            }
+            then()
+        }
+        // tvOS says when the switch ends, the moment the picture is back.
+        switchEnd = NotificationCenter.default.addObserver(
+            forName: .AVDisplayManagerModeSwitchEnd, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { finish("switched") }
+        }
+        modeWatch = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self else { return timer.invalidate() }
+                guard let self else { return }
                 let elapsed = CACurrentMediaTime() - began
                 if manager.isDisplayModeSwitchInProgress { self.switchSeen = true }
-                // A switch starts within a second of the write, or there is none (the modes matched).
-                let settled = self.switchSeen ? !manager.isDisplayModeSwitchInProgress : elapsed > 1
-                guard settled || elapsed > Self.switchTime else { return }
-                timer.invalidate()
-                self.modeWatch = nil
-                if resume, self.channel.playing, self.player.engine.state != .playing {
-                    NSLog("[pip] the display mode switch paused the video; playing it again")
-                    self.channel.change(Change(paused: false))
-                }
-                then()
+                // A switch starts within half a second of the write, or there is none (the modes matched).
+                if !self.switchSeen, elapsed > 0.5 { return finish("unchanged") }
+                if self.switchSeen, !manager.isDisplayModeSwitchInProgress { return finish("switched (polled)") }
+                if elapsed > Self.switchTime { finish("still switching; going on") }
             }
         }
     }
+
+    private var switchEnd: NSObjectProtocol?
 
     /// Back to the video's own mode, once it's in the app again.
     private func putBackDisplayMode() {

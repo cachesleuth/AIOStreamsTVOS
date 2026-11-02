@@ -140,7 +140,8 @@ the bridge script adds the button to the page's controls, in the look of the pag
   the window's video paused for good, so the app switches first: it drops the engine's display
   criteria, waits for the TV to settle (the screen goes black for about 2 seconds, in the app),
   plays the video again if the switch paused it, then opens the window. The criteria go back when
-  the video returns to the app.
+  the video returns to the app. Only a video that switched the TV when it started does this (the
+  app watches tvOS's mode-switch notifications); the rest open the window straight away.
 - Opening the app again, or the window's full-screen button, puts the video back in the app.
   Closing the window pauses the video, as on Android.
 - The app has the `audio` background mode, which tvOS needs to keep playing in the window, and the
