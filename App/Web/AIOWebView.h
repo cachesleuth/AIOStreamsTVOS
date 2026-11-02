@@ -36,6 +36,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)setStartScript:(NSString *)script;
 - (void)loadURL:(NSURL *)url;
 - (void)evaluateJavaScript:(NSString *)script;
+/** As `evaluateJavaScript:`, with `done` called on the main thread once the page has run it. */
+- (void)evaluateJavaScript:(NSString *)script done:(void (^)(void))done;
 /** Makes the page focused and active, which `:focus` and `:focus-visible` need. */
 - (void)focusPage;
 /** Forgets everything WebKit saved for pages: storage, IndexedDB, caches. */

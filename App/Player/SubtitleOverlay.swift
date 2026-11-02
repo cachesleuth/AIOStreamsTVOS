@@ -12,7 +12,8 @@ import UIKit
  *
  * Cues carry the source's own timestamps, so they're matched against the
  * engine's source clock, less the page's subtitle delay. The page's sizes are
- * mpv's, in units of a 720-line picture, and are scaled to the picture here.
+ * mpv's, in units of a 720-line screen, and are scaled to the screen here, so
+ * a film's shape doesn't change them; positions are still the picture's.
  */
 @MainActor
 final class SubtitleOverlay: UIView {
@@ -310,12 +311,14 @@ final class SubtitleOverlay: UIView {
         }
     }
 
-    /// Sizes at sub-scale 1, in units of a 720-line picture: mpv's 55-unit font made 20% smaller,
+    /// Sizes at sub-scale 1, in units of a 720-line screen: mpv's 55-unit font made 20% smaller,
     /// which reads better on a TV; the margin is mpv's.
     private static let fontUnits: CGFloat = 44
     private static let marginUnits: CGFloat = 22
 
-    private func units(_ rect: CGRect) -> CGFloat { rect.height / 720 }
+    /// One unit of a 720-line screen. Sized to the screen, not the picture, as mpv's `sub-scale-by-window`
+    /// does, so a 2.39:1 film's letterbox doesn't make its subtitles smaller than a 16:9 episode's.
+    private var unit: CGFloat { bounds.height / 720 }
 
     /**
      * A cue's text, drawn as two layers the way libass draws it: the outline
@@ -331,7 +334,6 @@ final class SubtitleOverlay: UIView {
 
     private func attributed(_ runs: [SubtitleRun]) -> CueText {
         let look = look
-        let unit = units(videoRect())
         let size = max(12, Self.fontUnits * CGFloat(look?.scale ?? 1) * unit)
         let fill = look.flatMap { Self.parseColor($0.color) } ?? .white
         let outlineColor = look.flatMap { Self.parseColor($0.outlineColor) } ?? .black
@@ -398,7 +400,6 @@ final class SubtitleOverlay: UIView {
         guard text.length > 0 else { return }
         // Cropped, the picture runs off the screen; the text stays on it.
         let rect = cropped ? picture.intersection(bounds) : picture
-        let unit = units(picture)
         let margin = Self.marginUnits * unit
         let alignment = placement?.alignment ?? 2
         let row = (alignment - 1) / 3  // 0 bottom, 1 middle, 2 top

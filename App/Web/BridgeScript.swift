@@ -56,14 +56,17 @@ enum BridgeScript {
    * rows they bring in ahead of time while they run: the likely reason the
    * home and discover pages ran its process out of memory when scrolled
    * fast. A held key's repeats now jump to each row instead of sliding; a
-   * single press still slides.
+   * single press still slides. Held lasts a moment past the last key, so the
+   * first slide after letting go isn't cut to a jump too.
    */
   let held = false;
   let lastDown = 0;
+  const HELD_LASTS = 250;
+  const holding = () => held && performance.now() - lastDown < HELD_LASTS;
   try {
     const animate = Element.prototype.animate;
     Element.prototype.animate = function (keyframes, options) {
-      if (held && this.hasAttribute && this.hasAttribute('data-glide-layer'))
+      if (holding() && this.hasAttribute && this.hasAttribute('data-glide-layer'))
         return animate.call(this, keyframes, { duration: 0 });
       return animate.call(this, keyframes, options);
     };
@@ -273,6 +276,7 @@ enum BridgeScript {
       /** Whether the player's picture-in-picture button shows. */
       pip(offered) {
         pipOffered = !!offered;
+        watchPip(pipOffered);
         queuePip();
       },
       /** The text typed on the app's alert keyboard, all at once. */
@@ -369,12 +373,26 @@ enum BridgeScript {
     pipQueued = true;
     requestAnimationFrame(placePip);
   };
-  try {
-    new MutationObserver(() => {
-      if (pipLabel?.isConnected && !pipButton?.isConnected) hidePipLabel();
-      if (pipOffered && !pipButton?.isConnected) queuePip();
-    }).observe(document.documentElement, { childList: true, subtree: true });
-  } catch {}
+  /*
+   * Puts the button back when React rebuilds the bar. Watched only while the
+   * button is offered (a video playing): on the catalog pages every row and
+   * card React mounts would otherwise be a record for it.
+   */
+  let pipObserver = null;
+  const watchPip = (on) => {
+    try {
+      if (on && !pipObserver) {
+        pipObserver = new MutationObserver(() => {
+          if (pipLabel?.isConnected && !pipButton?.isConnected) hidePipLabel();
+          if (pipOffered && !pipButton?.isConnected) queuePip();
+        });
+        pipObserver.observe(document.documentElement, { childList: true, subtree: true });
+      } else if (!on && pipObserver) {
+        pipObserver.disconnect();
+        pipObserver = null;
+      }
+    } catch {}
+  };
 
   // A TV has no console; the app keeps these in its start-up log.
   window.addEventListener('error', (e) =>

@@ -23,6 +23,8 @@ final class MainViewController: UIViewController, RemoteReceiver {
     /// `aiostreams://` links, held until the page listens for them.
     private var links: [String] = []
     private var linksReady = false
+    /// A held key's repeat the page hasn't finished with.
+    private var repeatInFlight = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -218,7 +220,16 @@ final class MainViewController: UIViewController, RemoteReceiver {
     private func setUpInput() {
         input.keyDown = { [weak self] key, repeated in
             guard let self else { return }
-            self.callTV("down(\(self.jsString(key)),\(repeated))")
+            let call = "window.__aioTV&&window.__aioTV.down(\(self.jsString(key)),\(repeated))"
+            guard repeated else {
+                self.web?.evaluateJavaScript(call)
+                return
+            }
+            // A held key repeats at the page's pace: while the page is still on the last repeat (laying out
+            // a new row, say), the next is dropped rather than queued, so focus doesn't run on in a burst.
+            guard !self.repeatInFlight, let web = self.web else { return }
+            self.repeatInFlight = true
+            web.evaluateJavaScript(call) { [weak self] in self?.repeatInFlight = false }
         }
         input.keyUp = { [weak self] key in
             guard let self else { return }

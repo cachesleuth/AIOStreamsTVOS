@@ -79,6 +79,10 @@ static NSString *AIOMimeType(NSString *extension) {
 @property (nonatomic, weak) AIOWebView *owner;
 @property (nonatomic, copy) NSString *scheme;
 @property (nonatomic, strong) NSURL *root;
+/** Tasks WebKit hasn't stopped, which may still be answered. Main thread only. */
+@property (nonatomic, strong) NSHashTable *liveTasks;
+/** Reads the bundled files, so a chunk or font loading mid-scroll doesn't hold up the main thread. */
+@property (nonatomic, strong) dispatch_queue_t fileQueue;
 @end
 
 @interface AIOWebView ()
@@ -151,23 +155,45 @@ static NSString *AIOMimeType(NSString *extension) {
     NSURLRequest *request = AIOSend0(task, @"request");
     NSURL *url = request.URL;
     NSString *path = url.path.length > 1 ? url.path : @"/index.html";
+    if ([path hasPrefix:@"/thumbnail/"]) {
+        // Seek-bar thumbnails the player made, which the page was sent the paths of. In memory already.
+        AIOWebView *owner = self.owner;
+        NSData *data = owner.thumbnailAtPath ? owner.thumbnailAtPath(path) : nil;
+        [self answer:task url:url path:path data:data];
+        return;
+    }
+    if (!self.liveTasks) self.liveTasks = [NSHashTable weakObjectsHashTable];
+    if (!self.fileQueue) {
+        self.fileQueue = dispatch_queue_create("io.github.aiostreams.web-files", DISPATCH_QUEUE_CONCURRENT);
+    }
+    [self.liveTasks addObject:task];
     NSString *rootPath = self.root.URLByStandardizingPath.path;
     NSURL *file = [self.root URLByAppendingPathComponent:[path substringFromIndex:1]].URLByStandardizingPath;
-    NSData *data = nil;
-    if ([path hasPrefix:@"/thumbnail/"]) {
-        // Seek-bar thumbnails the player made, which the page was sent the paths of.
-        AIOWebView *owner = self.owner;
-        if (owner.thumbnailAtPath) data = owner.thumbnailAtPath(path);
-    } else if ([file.path hasPrefix:[rootPath stringByAppendingString:@"/"]]) {
+    __weak AIOWebKitDelegate *weakSelf = self;
+    dispatch_async(self.fileQueue, ^{
         // Nothing outside the bundled build.
-        data = [NSData dataWithContentsOfURL:file];
-    }
+        NSData *data = [file.path hasPrefix:[rootPath stringByAppendingString:@"/"]]
+            ? [NSData dataWithContentsOfURL:file options:NSDataReadingMappedIfSafe error:nil]
+            : nil;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            AIOWebKitDelegate *strongSelf = weakSelf;
+            // WebKit throws if a task it stopped is answered.
+            if (!strongSelf || ![strongSelf.liveTasks containsObject:task]) return;
+            [strongSelf.liveTasks removeObject:task];
+            [strongSelf answer:task url:url path:path data:data];
+        });
+    });
+}
+
+/** Main thread. A file under `/static/` has its content hash in its name, so it never changes. */
+- (void)answer:(id)task url:(NSURL *)url path:(NSString *)path data:(nullable NSData *)data {
     NSInteger status = data ? 200 : 404;
     data = data ?: [NSData data];
+    BOOL hashed = status == 200 && [path hasPrefix:@"/static/"];
     NSDictionary *headers = @{
         @"Content-Type": data.length ? AIOMimeType(path.pathExtension) : @"text/plain",
         @"Content-Length": [NSString stringWithFormat:@"%lu", (unsigned long)data.length],
-        @"Cache-Control": @"no-cache",
+        @"Cache-Control": hashed ? @"public, max-age=31536000, immutable" : @"no-cache",
     };
     NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:url
                                                               statusCode:status
@@ -180,7 +206,8 @@ static NSString *AIOMimeType(NSString *extension) {
 }
 
 - (void)webView:(id)webView stopURLSchemeTask:(id)task {
-    // Each file is answered in full as it is asked for, so nothing is left to stop.
+    // A file still being read is dropped when it arrives.
+    [self.liveTasks removeObject:task];
 }
 
 @end
@@ -319,6 +346,19 @@ static NSString *AIOMimeType(NSString *extension) {
     SEL sel = NSSelectorFromString(@"evaluateJavaScript:completionHandler:");
     if (!self.webView || ![self.webView respondsToSelector:sel]) return;
     ((void (*)(id, SEL, id, id))objc_msgSend)(self.webView, sel, script, nil);
+}
+
+- (void)evaluateJavaScript:(NSString *)script done:(void (^)(void))done {
+    SEL sel = NSSelectorFromString(@"evaluateJavaScript:completionHandler:");
+    if (!self.webView || ![self.webView respondsToSelector:sel]) {
+        done();
+        return;
+    }
+    // WebKit calls it on the main thread, with the result or an error; only that it ran matters.
+    void (^finished)(id, NSError *) = ^(id result, NSError *error) {
+        done();
+    };
+    ((void (*)(id, SEL, id, id))objc_msgSend)(self.webView, sel, script, finished);
 }
 
 - (void)focusPage {
