@@ -7,7 +7,7 @@ import TVServices
  * told to ask the extension again.
  */
 enum TopShelf {
-    /// The last list the page sent, and when, for the diagnostics.
+    /// The last list the page sent, and when, for the app menu and the diagnostics.
     private static var received: (date: Date, count: Int, saved: Bool)?
 
     static func publish(_ message: Message) {
@@ -42,7 +42,7 @@ enum TopShelf {
     }
 
     /**
-     * Where the Top Shelf breaks down, for the diagnostics:
+     * Where the Top Shelf breaks down, for the app menu and the diagnostics:
      * the App Group the signing kept, the extension in the app, the page's
      * list, and whether tvOS has asked the extension for it.
      */

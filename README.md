@@ -99,7 +99,7 @@ again.
   extension with it, so a sideloading tool can carry it over when it re-signs. Some tools swap it
   for generic groups (`group.<hash>.1` to `.5`) in no set order, so the app writes the list to every
   group it's signed with, and the extension reads the newest copy from any of them.
-- The diagnostics the page asks the app for show the groups, the extension's bundle ID and profile, the page's list
+- The app menu (hold Play/Pause) and the diagnostics the page asks the app for show the groups, the extension's bundle ID and profile, the page's list
   and when tvOS last asked the extension. If tvOS never asks, restart the Apple TV once after
   installing.
 - The extension needs a profile of its own, for an App ID under the app's with the same App Group.
@@ -140,7 +140,7 @@ Back behaviour and the bundled-player path. It also means:
 | Click on a text field               | tvOS's search keyboard over the page, typing straight into the field (dictation on the mic button); Menu or moving down closes it. Passwords and PINs get the keyboard in an alert |
 | Back / Menu                         | The page's Back; twice on Home leaves the app     |
 | Play/Pause                          | Play/Pause                                        |
-| **Hold Play/Pause (1 s)**           | App menu: reload, or reset the app's data         |
+| **Hold Play/Pause (1 s)**           | App menu: the app's diagnostics (move left onto them, then swipe or click up and down to scroll), reload, or reset the app's data |
 
 ## Saved data
 

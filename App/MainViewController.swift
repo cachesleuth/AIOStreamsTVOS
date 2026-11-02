@@ -277,21 +277,17 @@ final class MainViewController: UIViewController, RemoteReceiver {
     /// With how the video plays and what the TV was asked for, to see why HDR doesn't reach the TV.
     private func presentAppMenu(video: [String: String]) {
         guard presentedViewController == nil else { return }
-        let menu = UIAlertController(
-            title: "AIOStreams",
-            message: "App \(Identity.version) · web app \(WebApp.commit) · \(storage.keyCount) saved keys\n\n"
-                + (AppAnswers.videoLines(video, window: view.window) + MemoryLog.report).joined(separator: "\n"),
-            preferredStyle: .actionSheet
-        )
-        menu.addAction(UIAlertAction(title: "Reload", style: .default) { [weak self] _ in
-            self?.loadPage()
-        })
-        menu.addAction(UIAlertAction(title: "Reset the app's data", style: .destructive) { [weak self] _ in
-            DispatchQueue.main.async { self?.confirmReset() }
-        })
-        menu.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
-            self?.web?.focusPage()
-        })
+        let lines = ["App \(Identity.version) · web app \(WebApp.commit) · \(storage.keyCount) saved keys", ""]
+            + AppAnswers.videoLines(video, window: view.window) + [""]
+            + MemoryLog.report + [""]
+            + TopShelf.report
+        let menu = AppMenu(title: "AIOStreams", text: lines.joined(separator: "\n"), actions: [
+            AppMenu.Action(title: "Reload", destructive: false) { [weak self] in self?.loadPage() },
+            AppMenu.Action(title: "Reset the app's data", destructive: true) { [weak self] in self?.confirmReset() },
+            AppMenu.Action(title: "Close", destructive: false) {},
+        ])
+        // However it closed: an action, Close or Menu.
+        menu.closed = { [weak self] in self?.web?.focusPage() }
         present(menu, animated: true)
     }
 
