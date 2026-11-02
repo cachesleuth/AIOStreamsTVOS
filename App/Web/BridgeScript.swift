@@ -137,8 +137,8 @@ enum BridgeScript {
     tv: true,
     voice: false,
     gamepads: false,
-    // Shows the page's Picture-in-picture setting; the app's button in the player starts the window.
-    pip: true,
+    // Hides the page's Picture-in-picture setting: tvOS doesn't allow it for mpv's display layer (see PictureInPicture.enabled).
+    pip: false,
     device: __DEVICE__,
     deviceId: __DEVICE_ID__,
     send,

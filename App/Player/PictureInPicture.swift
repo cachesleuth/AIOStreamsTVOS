@@ -43,7 +43,17 @@ final class PictureInPicture: NSObject {
         super.init()
     }
 
-    private let supported = AVPictureInPictureController.isPictureInPictureSupported()
+    /**
+     * Off: on tvOS, `isPictureInPicturePossible` never becomes true for a
+     * sample buffer display layer, from tvOS 15 to at least tvOS 26, as
+     * PiPBugDemo shows (Apple feedback FB9751461): tvOS never asks the
+     * playback delegate for the range and paused state, as iOS does. Turning
+     * this on, with `pip: true` in the bridge script and the `audio`
+     * background mode, brings the button and the page's setting back.
+     */
+    static let enabled = false
+
+    private let supported = PictureInPicture.enabled && AVPictureInPictureController.isPictureInPictureSupported()
     /// Watches for tvOS to allow the window after a press, and gives up after a while.
     private var possible: NSKeyValueObservation?
     private var waiting: DispatchWorkItem?

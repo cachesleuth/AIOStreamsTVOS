@@ -83,28 +83,15 @@ without an ask, and open the file again on the next one.
 
 ### Picture in picture
 
-While a video plays, the **picture-in-picture button** at the end of the player's bottom row moves
-it into a small window, and the app steps back to the Home screen; the video keeps playing over the
-Home screen and other apps. This is the Android app's picture-in-picture: the page's **Settings →
-Android app → Picture-in-picture** switch allows it, and the page hides its player while the window
-shows.
+There is none. tvOS never allows picture-in-picture for an `AVSampleBufferDisplayLayer`, the layer
+mpv draws into: `isPictureInPicturePossible` stays false from tvOS 15 to at least tvOS 26, as
+[PiPBugDemo](https://github.com/jazzychad/PiPBugDemo) shows (Apple feedback FB9751461), while the
+same code works on iOS. tvOS only puts Apple's own player (`AVPlayer`) in the window, and mpv plays
+outside it. The app tells the page it has none (`pip: false`), so the page hides its setting.
 
-Android enters it on leaving the app, but tvOS only starts it from inside an app, and the page has
-no button for it, so the bridge script adds one to the page's controls. It copies the look of the
-page's own buttons, and the page's remote navigation reaches it like any other button; when the page
-rebuilds its controls, the script puts it back.
-
-- Opening the app again, or the window's full-screen button, puts the video back in the app.
-- Closing the window pauses the video, as on Android.
-- The window's play/pause and skip buttons drive mpv straight away; the page catches up when the
-  app is back.
-- mpv's display layer goes into the window as it is (`AVPictureInPictureController`'s sample
-  buffer source), as in MPVKit's demo, and subtitles are copied over it from mpv's subtitle layer.
-- tvOS only allows the window for a display layer with a clock it can read the position from, so
-  from the button press until the window closes the layer gets one that follows mpv's position and
-  speed (which also moves the window's progress bar). The controller is made at the press, and the
-  window starts as soon as tvOS allows it, or the app says it isn't available after 4 seconds.
-- The app has the `audio` background mode, which tvOS needs to keep playing in the window.
+`App/Player/PictureInPicture.swift` is kept, switched off (`PictureInPicture.enabled`), for a tvOS
+that fixes it: on, with `pip: true` in the bridge script and the `audio` background mode, it adds a
+button to the player's bottom row that moves mpv's video into the window.
 
 ### Top Shelf
 
@@ -151,8 +138,7 @@ app on a TV (`platform: 'android'`, `tv: true`). That gets the TV layout, remote
 Back behaviour and the bundled-player path. It also means:
 
 - Jellyfin lists the device as **AIOStreams Android TV**.
-- Settings shows an **Android app** section. Its mpv.conf editor and Picture-in-picture switch
-  work (the switch shows the app's picture-in-picture button in the player); updates show as off, and Play in the background does nothing.
+- Settings shows an **Android app** section. Its mpv.conf editor works; updates show as off.
 - Android-only playback settings (frame rate matching, tunnelling) show and do nothing.
 - mpv's statistics overlay is a Lua script, which tvOS's libmpv lacks, so the app draws its own
   from mpv's properties: the same pages (Playback, Frame timings, Cache, Tracks), as plain text.
