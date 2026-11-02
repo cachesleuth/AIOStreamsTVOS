@@ -75,13 +75,25 @@ For Atmos at all, set **Settings → Video and Audio → Audio Format** to **Aut
 output: `E-AC-3 Atmos passthrough` is Atmos on its way to the receiver. The app
 menu (hold Play/Pause) and the diagnostics add the audio route and the engine's recent audio log.
 
+When a video freezes or falls behind its sound, the same report has the playback health: the
+buffer held ahead (and its lowest in the last 30 s), stalls, dropped frames, the rate the video
+plays at against what the source delivered, and producer restarts. A buffer that runs dry with
+the source below the video's rate is the network; a full buffer with frames dropping is the
+picture falling behind. The menu's **Hold one source connection** reads the source over one
+connection instead of ranged requests (AetherEngine's `heldSourceConnection`, HTTP/1.1 only),
+from the next video.
+
 ### HDR
 
-- **HDR10, HDR10+, HLG and Dolby Vision** reach the TV in their own mode. The engine asks tvOS for
+- **HDR10, HDR10+ and HLG** reach the TV in their own mode. The engine asks tvOS for
   the matching TV mode at the video's frame rate before it plays, and for the TV's own mode when
   playback stops. tvOS only switches with **Settings → Video and Audio → Match Content** (Dynamic
-  Range, and Frame Rate if you want that too) turned on. Dolby Vision profile 7 plays as
-  single-layer profile 8.1, and on a TV without Dolby Vision, Dolby Vision plays as HDR10.
+  Range, and Frame Rate if you want that too) turned on.
+- **Dolby Vision** reaches a Dolby Vision TV in its own mode; profile 7 plays as single-layer
+  profile 8.1. On a TV without Dolby Vision it plays as its base layer (AetherEngine's
+  `dolbyVisionHandling = .baseLayerOnly`): profiles 7, 8.1 and 8.4 as HDR10 (with any HDR10+
+  metadata) or HLG, with no profile 7 to 8.1 conversion and no Dolby Vision work for AVPlayer per
+  frame. Profile 5 has no base layer and keeps playing as Dolby Vision, tone-mapped by AVPlayer.
 
 ### Subtitles
 
@@ -214,7 +226,7 @@ Back behaviour and the bundled-player path. It also means:
 | Click in a searchable list          | Such as Discover's catalog picker: after moving through it with Up or Down, picks the highlighted entry; straight away, opens the keyboard to search |
 | Back / Menu                         | The page's Back; twice on Home leaves the app     |
 | Play/Pause                          | Play/Pause                                        |
-| **Hold Play/Pause (1 s)**           | App menu: the app's diagnostics (move left onto them, then swipe or click up and down to scroll), reload, or reset the app's data |
+| **Hold Play/Pause (1 s)**           | App menu: the app's diagnostics (move left onto them, then swipe or click up and down to scroll), reload, switch the source connection, or reset the app's data |
 
 ## Saved data
 

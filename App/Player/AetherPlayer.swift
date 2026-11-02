@@ -59,6 +59,22 @@ final class AetherPlayer {
     private var addedSubtitles: [Int: String] = [:]
     private var leftWithFile = false
     private var lastBuffered: Double?
+    /// The file's buffer, stalls, dropped frames and rates, for the report.
+    private var health = PlaybackHealth()
+    /// The source connection the file opened with, which a change in the menu leaves as it is.
+    private var openedHeld = false
+
+    /**
+     * One connection to the source, read as playback needs it, instead of
+     * ranged requests that end when the read-ahead fills and open again as it
+     * drains (`LoadOptions.heldSourceConnection`). HTTP/1.1 only. Set from the
+     * app menu; a file opens with the setting it finds, so it applies from
+     * the next video.
+     */
+    static var heldSourceConnection: Bool {
+        get { UserDefaults.standard.bool(forKey: "player.heldSourceConnection") }
+        set { UserDefaults.standard.set(newValue, forKey: "player.heldSourceConnection") }
+    }
 
     init(view: AetherPlayerView, subtitles: SubtitleOverlay) throws {
         EngineLogBook.install()
@@ -110,6 +126,7 @@ final class AetherPlayer {
         ended = false
         addedSubtitles = [:]
         lastBuffered = nil
+        health = PlaybackHealth()
         subtitles.reset()
         listener?.playerEvent("start")
         listener?.playerState(["idle": false, "buffering": true, "positionMs": request.startMs])
@@ -154,6 +171,14 @@ final class AetherPlayer {
         options.audioShaping = shaping
         options.audioDelaySeconds = settings.audioDelayMs / 1000
         if !settings.hardwareDecoding { options.preferredDecodePath = .software }
+        // On a TV without Dolby Vision, Dolby Vision plays as its HDR10 / HLG base layer, HDR10+ metadata
+        // included: no Profile 7 -> 8.1 RPU conversion and no Dolby Vision in the container, so AVPlayer
+        // composes nothing per frame. A Dolby Vision TV keeps Dolby Vision; Profile 5 keeps it everywhere.
+        if !AetherEngine.displayCapabilities.supportsDolbyVision {
+            options.dolbyVisionHandling = .baseLayerOnly
+        }
+        options.heldSourceConnection = Self.heldSourceConnection
+        openedHeld = options.heldSourceConnection
         // ASS and SSA cues come as their event lines, for libass (`SubtitleOverlay`); other formats are unaffected.
         options.preserveASSMarkup = true
         // A text subtitle rendition AVPlayer can show itself, for the picture-in-picture window, where the
@@ -382,6 +407,19 @@ final class AetherPlayer {
             .sink { [weak self] buffering in
                 guard let self, self.current != nil, !self.ended else { return }
                 self.listener?.playerState(["buffering": buffering])
+                // Waiting for data mid-play; a seek, a load and a track switch's reload wait too, by design.
+                if buffering, self.engine.hasFirstFrameReadyForDisplay, !self.engine.isSeeking,
+                   self.engine.state == .playing || self.engine.state == .paused {
+                    self.health.stalled()
+                }
+            }
+            .store(in: &watching)
+        engine.diagnostics.$liveTelemetry
+            .compactMap { $0 }
+            .sink { [weak self] telemetry in
+                guard let self, self.current != nil, !self.ended else { return }
+                let playing = self.engine.state == .playing && !self.engine.isBuffering
+                self.health.record(telemetry, playing: playing, at: ProcessInfo.processInfo.systemUptime)
             }
             .store(in: &watching)
         engine.$isSeeking
@@ -745,6 +783,10 @@ final class AetherPlayer {
         lines.append("Audio shaping: \(engine.audioShapingState.rawValue)")
         lines.append("Audio output: \(AudioOutput.routeSummary)")
         if !AudioOutput.routeIsHDMI { lines.append("Atmos needs the HDMI output; this route can't carry Dolby MAT") }
+        var connection = "Source connection: " + (openedHeld ? "held (one connection)" : "ranged requests")
+        if openedHeld != Self.heldSourceConnection { connection += "; the next video opens with the other" }
+        lines.append(connection)
+        lines += health.lines
         return lines
     }
 
