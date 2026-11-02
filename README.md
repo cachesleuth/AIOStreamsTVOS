@@ -43,19 +43,12 @@ page the same way:
   HDR metadata. `MPVEngine` and `PlayerChannel` otherwise follow AIOStreams' Android `MpvEngine` and
   `PlayerChannel`: the same observed properties and messages.
 
-### HDR and Dolby Vision
+### HDR
 
 - **HDR10 and HLG** reach the TV as HDR. When a video starts, `DisplayMode` asks tvOS for the
   matching TV mode (HDR10, HLG or SDR) at the video's frame rate, and goes back to the TV's own mode
   when playback ends. tvOS only switches with **Settings → Video and Audio → Match Content**
   (Dynamic Range, and Frame Rate if you want that too) turned on.
-- **Dolby Vision** plays through its HDR10 base layer, so the TV shows HDR10, not Dolby Vision.
-  That covers profile 8 (most streaming releases) and profile 7 (UHD Blu-ray remuxes). Real Dolby
-  Vision output on Apple TV only comes from Apple's own player, which can't play what mpv plays.
-- **Profile 5** has no HDR10 base layer, so its colours come out wrong (purple and green).
-- **HDR10+** plays as HDR10. tvOS doesn't send HDR10+ for frames mpv decodes itself, even with the
-  metadata attached to them and the TV in HDR10+ mode, so the app uses Streamyfin's MPVKit without
-  the HDR10+ patch.
 - Subtitles are drawn by libass with the bundled Noto Sans (SIL Open Font License), as libass can't
   open tvOS's own fonts.
 
