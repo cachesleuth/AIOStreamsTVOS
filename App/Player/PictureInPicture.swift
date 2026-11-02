@@ -83,6 +83,10 @@ final class PictureInPicture: NSObject {
             return failed("Picture-in-picture isn't available for this video.")
         }
         guard !active, waiting == nil, !switchingMode else { return }
+        pressedAt = CACurrentMediaTime()
+        Self.trace = []
+        step("button pressed; \(inVideoMode ? "the video switched the TV" : "the TV is in the Home screen's mode"), "
+             + "\(window()?.avDisplayManager?.preferredDisplayCriteria == nil ? "no" : "has") display criteria")
         // Made now, so tvOS weighs up the window during the switch rather than after it.
         guard prepareController() != nil else {
             return failed("Picture-in-picture isn't available for this video.")
@@ -96,6 +100,7 @@ final class PictureInPicture: NSObject {
         }
         heldCriteria = criteria
         let resume = player.engine.state == .playing
+        step("dropping the video's display mode")
         manager.preferredDisplayCriteria = nil
         settleDisplayMode(manager, resume: resume) { [weak self] in
             guard let self else { return }
@@ -120,7 +125,7 @@ final class PictureInPicture: NSObject {
             return failed("Picture-in-picture isn't available for this video.")
         }
         if controller.isPictureInPicturePossible { return begin(controller) }
-        NSLog("[pip] waiting for tvOS to allow the window")
+        step("waiting for tvOS to allow the window")
         possible = controller.observe(\.isPictureInPicturePossible, options: [.new]) { [weak self] controller, _ in
             guard controller.isPictureInPicturePossible else { return }
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.begin(controller) } }
@@ -129,7 +134,7 @@ final class PictureInPicture: NSObject {
             MainActor.assumeIsolated {
                 guard let self, self.waiting != nil else { return }
                 self.endWaiting()
-                NSLog("[pip] tvOS didn't allow the window in time")
+                self.step("tvOS didn't allow the window in time")
                 self.putBackDisplayMode()
                 self.failed("Picture-in-picture isn't available for this video right now.")
             }
@@ -140,9 +145,44 @@ final class PictureInPicture: NSObject {
 
     private func begin(_ controller: AVPictureInPictureController) {
         guard controller === self.controller, !controller.isPictureInPictureActive else { return }
-        if waiting != nil { NSLog("[pip] tvOS allowed the window") }
+        step(waiting != nil ? "tvOS allowed the window; starting it" : "window allowed; starting it")
         endWaiting()
         controller.startPictureInPicture()
+    }
+
+    // MARK: Timing
+
+    /// The last start's steps, timed from the press, for the app menu.
+    private(set) static var trace: [String] = []
+    private var pressedAt: CFTimeInterval = 0
+
+    private func step(_ what: String) {
+        let line = String(format: "+%.2f s  %@", CACurrentMediaTime() - pressedAt, what)
+        NSLog("[pip] %@", line)
+        Self.trace.append(line)
+        if Self.trace.count > 20 { Self.trace.removeFirst() }
+    }
+
+    /// For the app menu: how long the last start took, step by step.
+    static var report: [String] {
+        trace.isEmpty ? ["Picture in picture: not started yet"] : ["Picture in picture, last start:"] + trace
+    }
+
+    // MARK: Leaving for the Home screen
+
+    /**
+     * Back to the Home screen once the window shows. tvOS doesn't always take
+     * the first ask while the window is still settling, so it's asked again
+     * until the app has gone, three times at most.
+     */
+    private func leaveApp(attempt: Int = 1) {
+        guard active, UIApplication.shared.applicationState == .active else { return }
+        step("to the Home screen (try \(attempt))")
+        suspendApp()
+        guard attempt < 3 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            MainActor.assumeIsolated { self?.leaveApp(attempt: attempt + 1) }
+        }
     }
 
     private func endWaiting() {
@@ -206,9 +246,9 @@ final class PictureInPicture: NSObject {
             self.modeWatch = nil
             if let observer = self.switchEnd { NotificationCenter.default.removeObserver(observer) }
             self.switchEnd = nil
-            NSLog("[pip] display mode %@ after %.2f s", how, CACurrentMediaTime() - began)
+            self.step(String(format: "display mode %@ (%.2f s)", how, CACurrentMediaTime() - began))
             if resume, self.channel.playing, self.player.engine.state != .playing {
-                NSLog("[pip] the display mode switch paused the video; playing it again")
+                self.step("the switch paused the video; playing it again")
                 self.channel.change(Change(paused: false))
             }
             then()
@@ -254,6 +294,7 @@ final class PictureInPicture: NSObject {
 extension PictureInPicture: AVPictureInPictureControllerDelegate {
     nonisolated func pictureInPictureControllerWillStartPictureInPicture(_ controller: AVPictureInPictureController) {
         MainActor.assumeIsolated {
+            step("window starting")
             // The engine keeps the session through the background while the window shows.
             player.setPictureInPicture(true)
         }
@@ -261,13 +302,16 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
 
     nonisolated func pictureInPictureControllerDidStartPictureInPicture(_ controller: AVPictureInPictureController) {
         MainActor.assumeIsolated {
+            step("window showing")
             restoring = false
             send(["type": "pip", "value": true])
-            // Off to the Home screen, as Android leaves the app; the window stays over it.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-                MainActor.assumeIsolated {
-                    if self?.active == true { suspendApp() }
-                }
+            // Off to the Home screen, as Android leaves the app; the window stays over it. The text
+            // subtitles go into the window after that, so fetching them holds nothing up.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                MainActor.assumeIsolated { self?.leaveApp() }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                MainActor.assumeIsolated { self?.player.showSubtitlesInWindow() }
             }
         }
     }
@@ -278,7 +322,7 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
     ) {
         let reason = error.localizedDescription
         MainActor.assumeIsolated {
-            NSLog("[pip] didn't start: %@", reason)
+            step("didn't start: \(reason)")
             endWaiting()
             player.setPictureInPicture(false)
             putBackDisplayMode()

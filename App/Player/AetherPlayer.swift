@@ -593,9 +593,17 @@ final class AetherPlayer {
      */
     func setPictureInPicture(_ on: Bool) {
         engine.pictureInPictureActive = on
-        engine.setNativeSubtitleRendering(on)
+        // Off at once; on only once the window shows (`showSubtitlesInWindow`), as picking the
+        // rendition makes AVPlayer fetch it, which held up the window's start.
+        if !on { engine.setNativeSubtitleRendering(false) }
         // Closed out in the background: the engine lets the video go, so it's opened again on the way back.
         if !on, UIApplication.shared.applicationState == .background { heldByWindow = false }
+    }
+
+    /// The window shows: AVPlayer draws the text subtitles in it from the engine's native rendition.
+    func showSubtitlesInWindow() {
+        guard engine.pictureInPictureActive else { return }
+        engine.setNativeSubtitleRendering(true)
     }
 
     // MARK: Background

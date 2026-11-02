@@ -247,6 +247,8 @@ final class MainViewController: UIViewController, RemoteReceiver {
         lines.append("")
         lines += MemoryLog.report
         lines.append("")
+        lines += PictureInPicture.report
+        lines.append("")
         lines += TopShelf.report
         let menu = AppMenu(title: "AIOStreams", text: lines.joined(separator: "\n"), actions: [
             AppMenu.Action(title: "Reload", destructive: false) { [weak self] in self?.loadPage() },
