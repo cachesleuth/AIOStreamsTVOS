@@ -71,10 +71,15 @@ sent again, and each picture is a 384-pixel-wide JPEG the page loads from
 `aiostv://localhost/thumbnail/…` (the newest 256 are kept).
 
 Those apps make the pictures with AIOStreams' own keyframe reader, which loads FFmpeg as a shared
-library. tvOS's FFmpeg is linked into MPVKit, so a second, silent mpv makes them here
-(`App/Player/Thumbnails.swift`): it opens the file paused with no audio or cache, seeks to keyframes
-only, and renders each through libmpv's software renderer. HDR10 and HLG pictures are tone mapped
-to SDR. It closes after 45 seconds without an ask, and opens the file again on the next one.
+library. tvOS's FFmpeg is linked into MPVKit, so silent mpvs make them here
+(`App/Player/Thumbnails.swift`): each opens the file paused with no audio or cache, seeks to
+keyframes only, and renders each through libmpv's software renderer. HDR10 and HLG pictures are
+tone mapped to SDR.
+
+Two of them run, as most of a picture's wait is the network. One is kept for the page's next ask.
+The other finds the remote's scrub row's pictures, a seek step apart, up to four steps either side
+of the row's latest ask, before the page asks for them one by one. Both close after 45 seconds
+without an ask, and open the file again on the next one.
 
 ### Top Shelf
 

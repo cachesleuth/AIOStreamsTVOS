@@ -10,10 +10,14 @@ import MPVKit
  * and each picture is a JPEG the page loads from `/thumbnail/<file>-<ms>.jpg`.
  *
  * Those apps decode keyframes with AIOStreams/media, which loads FFmpeg as a
- * shared library. Here FFmpeg is linked into MPVKit without its headers, so a
- * second, silent mpv makes them: it opens the file paused, seeks to keyframes
- * and renders each in software at thumbnail size. Everything but `want` and
- * `close` runs on one serial queue.
+ * shared library. Here FFmpeg is linked into MPVKit without its headers, so
+ * silent mpvs make them: each opens the file paused, seeks to keyframes and
+ * renders each in software at thumbnail size.
+ *
+ * Two of them run, as most of a picture's wait is the network: one is kept for
+ * the page's next ask, and the other finds the remote's scrub row's next
+ * pictures before the page asks, as those apps fetch several keyframes at once.
+ * Everything but `want` and `close` runs on one serial queue.
  */
 final class Thumbnails {
     private let send: (Message) -> Void
@@ -31,17 +35,34 @@ final class Thumbnails {
         let keyframe: Int64
     }
 
+    /// One mpv and the keyframe it's finding.
+    private final class Worker {
+        var decoder: ThumbnailDecoder?
+        /// The position it's seeking to.
+        var target: Int64?
+        /// The page's ask for `target`; without one, it's finding it ahead of the page.
+        var ask: Ask?
+        var giveUp: DispatchWorkItem?
+        /// It failed on this file, so it sits out.
+        var broken = false
+
+        /// Free for a seek: nothing in flight, and the first picture already come if it's open.
+        var free: Bool { !broken && target == nil && (decoder?.ready ?? true) }
+    }
+
     // Used on `queue` only.
+    private let workers = (0..<Thumbnails.workerCount).map { _ in Worker() }
     private var url: String?
     private var headers: [String: String] = [:]
     private var file = 0
-    private var decoder: ThumbnailDecoder?
     /// The file has no thumbnails.
     private var none = false
-    private var asking: Ask?
     private var wanted: Ask?
     private var spans: [Span] = []
-    private var giveUp: DispatchWorkItem?
+    /// The scrub row's recent asks, which come without `showingMs`, and when.
+    private var rowAsks: [(ms: Int64, at: TimeInterval)] = []
+    /// Positions found ahead that took too long, not tried ahead again.
+    private var skipped = Set<Int64>()
     private var idle: DispatchWorkItem?
 
     init(send: @escaping (Message) -> Void) {
@@ -76,77 +97,131 @@ final class Thumbnails {
         if none { return answer(nil) }
         stayOpen()
         guard let position else {
-            if decoder == nil { open(at: nil) }
+            if let first = workers.first, first.decoder == nil, !first.broken { open(first, at: nil) }
             return
         }
+        if showing == nil { noteRow(position) }
         wanted = Ask(ms: position, showing: showing)
         pump()
     }
 
-    /// Answers the newest ask from what's known, or has the decoder find it once it's free.
+    /// Answers the newest ask from what's known or hands it to a free mpv, then finds what the row asks next.
     private func pump() {
-        guard !none, let ask = wanted else { return }
-        if let keyframe = known(ask.ms) {
-            wanted = nil
-            if keyframe != ask.showing { answer(keyframe) }
-            return
+        guard !none else { return }
+        if let ask = wanted {
+            if let keyframe = known(ask.ms) {
+                wanted = nil
+                if keyframe != ask.showing { answer(keyframe) }
+            } else if let ahead = workers.first(where: { $0.target == ask.ms && $0.ask == nil }) {
+                // Already being found ahead of the page.
+                wanted = nil
+                ahead.ask = ask
+            } else if let worker = workers.first(where: { $0.free }) {
+                wanted = nil
+                start(worker, at: ask.ms, for: ask)
+            }
         }
-        guard asking == nil else { return }
-        if let decoder {
-            // Opened ahead of any ask: its first picture comes first.
-            guard decoder.ready else { return }
-            wanted = nil
-            asking = ask
-            decoder.seek(ask.ms)
+        findAhead()
+    }
+
+    /**
+     * The row's pictures are a step apart around where the remote scrubs to,
+     * and the page asks for them one at a time, so the ones a step or more
+     * from the latest are found while it waits on that one.
+     */
+    private func findAhead() {
+        guard !none, wanted == nil, let latest = rowAsks.last?.ms, let step = rowStep() else { return }
+        let free = workers.filter { $0.free }
+        // One stays free for the page's next ask.
+        guard free.count >= 2, let worker = free.last else { return }
+        let end = workers.lazy.compactMap { $0.decoder?.durationMs }.first
+        for k in 1...Self.aheadSteps {
+            for sign: Int64 in [1, -1] {
+                let ms = latest + sign * Int64(k) * step
+                guard ms >= 0, end.map({ ms <= $0 }) ?? true, known(ms) == nil, !skipped.contains(ms),
+                      !workers.contains(where: { $0.target == ms })
+                else { continue }
+                return start(worker, at: ms, for: nil)
+            }
+        }
+    }
+
+    private func noteRow(_ ms: Int64) {
+        let now = ProcessInfo.processInfo.systemUptime
+        rowAsks.removeAll { now - $0.at > Self.rowWindow }
+        rowAsks.append((ms, now))
+        if rowAsks.count > 6 { rowAsks.removeFirst(rowAsks.count - 6) }
+    }
+
+    /// The row's step: the smallest gap between its recent asks.
+    private func rowStep() -> Int64? {
+        var step: Int64?
+        for (i, a) in rowAsks.enumerated() {
+            for b in rowAsks[(i + 1)...] {
+                let gap = abs(a.ms - b.ms)
+                if gap >= Self.minStep, gap < (step ?? .max) { step = gap }
+            }
+        }
+        return step
+    }
+
+    private func start(_ worker: Worker, at ms: Int64, for ask: Ask?) {
+        worker.target = ms
+        worker.ask = ask
+        if let decoder = worker.decoder {
+            decoder.seek(ms)
         } else {
-            wanted = nil
-            asking = ask
-            open(at: ask.ms)
-            guard decoder != nil else { return }
+            open(worker, at: ms)
+            guard worker.decoder != nil else { return }
         }
-        giveUp?.cancel()
-        let item = DispatchWorkItem { [weak self] in
-            guard let self, self.asking?.ms == ask.ms else { return }
-            NSLog("[thumbnails] no picture for %lld ms in time", ask.ms)
-            self.asking = nil
+        worker.giveUp?.cancel()
+        let item = DispatchWorkItem { [weak self, weak worker] in
+            guard let self, let worker, worker.target == ms else { return }
+            NSLog("[thumbnails] no picture for %lld ms in time", ms)
+            if worker.ask == nil { self.skipped.insert(ms) }
+            worker.target = nil
+            worker.ask = nil
             self.pump()
         }
-        giveUp = item
+        worker.giveUp = item
         queue.asyncAfter(deadline: .now() + Self.askTimeout, execute: item)
     }
 
-    private func open(at ms: Int64?) {
-        guard let url else { return }
+    private func open(_ worker: Worker, at ms: Int64?) {
+        guard let url, !worker.broken else { return }
         do {
-            let opened = try ThumbnailDecoder(url: url, headers: headers, startMs: ms, queue: queue) { [weak self] in
-                self?.decoded($0)
+            let opened = try ThumbnailDecoder(url: url, headers: headers, startMs: ms, queue: queue) {
+                [weak self, weak worker] event in
+                guard let self, let worker else { return }
+                self.decoded(event, by: worker)
             }
-            decoder = opened
+            worker.decoder = opened
             // A file that never shows its first picture opens again for the next ask.
-            queue.asyncAfter(deadline: .now() + Self.askTimeout) { [weak self, weak opened] in
-                guard let self, let opened, self.decoder === opened, !opened.ready else { return }
+            queue.asyncAfter(deadline: .now() + Self.askTimeout) { [weak self, weak worker, weak opened] in
+                guard let self, let worker, let opened, worker.decoder === opened, !opened.ready else { return }
                 NSLog("[thumbnails] the file showed no picture in time")
-                self.closeDecoder()
+                self.closeDecoder(worker)
                 self.pump()
             }
         } catch {
-            fail((error as? ProtocolError)?.message ?? error.localizedDescription)
+            broke(worker, (error as? ProtocolError)?.message ?? error.localizedDescription)
         }
     }
 
-    private func decoded(_ event: ThumbnailDecoder.Event) {
+    private func decoded(_ event: ThumbnailDecoder.Event, by worker: Worker) {
         switch event {
         case .failed(let reason):
-            fail(reason)
+            broke(worker, reason)
         case .frame(let keyframe, let jpeg):
             ThumbnailStore.keep(path(keyframe), jpeg)
-            giveUp?.cancel()
-            giveUp = nil
-            if let ask = asking {
-                asking = nil
+            worker.giveUp?.cancel()
+            worker.giveUp = nil
+            if let target = worker.target {
                 // A seek lands after its position only before the file's first keyframe.
-                learn(Span(from: min(keyframe, ask.ms), to: max(keyframe, ask.ms), keyframe: keyframe))
-                if keyframe != ask.showing { answer(keyframe) }
+                learn(Span(from: min(keyframe, target), to: max(keyframe, target), keyframe: keyframe))
+                if let ask = worker.ask, keyframe != ask.showing { answer(keyframe) }
+                worker.target = nil
+                worker.ask = nil
             } else {
                 learn(Span(from: keyframe, to: keyframe, keyframe: keyframe))
             }
@@ -154,10 +229,21 @@ final class Thumbnails {
         }
     }
 
+    /// One mpv failed: the others carry on, and the file has none only once all have failed.
+    private func broke(_ worker: Worker, _ reason: String) {
+        let ask = worker.ask
+        closeDecoder(worker)
+        worker.broken = true
+        guard !workers.allSatisfy({ $0.broken }) else { return fail(reason) }
+        NSLog("[thumbnails] one of the decoders stopped: %@", reason)
+        if let ask, wanted == nil { wanted = ask }
+        pump()
+    }
+
     private func fail(_ reason: String) {
         NSLog("[thumbnails] none for this file: %@", reason)
         none = true
-        closeDecoder()
+        workers.forEach(closeDecoder)
         wanted = nil
         answer(nil)
     }
@@ -190,34 +276,46 @@ final class Thumbnails {
         return span.keyframe
     }
 
-    /// A paused mpv holds a connection and a decoder, so it closes when the page stops asking.
+    /// A paused mpv holds a connection and a decoder, so they close when the page stops asking.
     private func stayOpen() {
         idle?.cancel()
         let item = DispatchWorkItem { [weak self] in
-            guard let self, self.asking == nil else { return }
-            self.closeDecoder()
+            guard let self, self.workers.allSatisfy({ $0.target == nil }) else { return }
+            self.workers.forEach(self.closeDecoder)
         }
         idle = item
         queue.asyncAfter(deadline: .now() + Self.idleTimeout, execute: item)
     }
 
-    private func closeDecoder() {
-        decoder?.destroy()
-        decoder = nil
-        asking = nil
-        giveUp?.cancel()
-        giveUp = nil
+    private func closeDecoder(_ worker: Worker) {
+        worker.decoder?.destroy()
+        worker.decoder = nil
+        worker.target = nil
+        worker.ask = nil
+        worker.giveUp?.cancel()
+        worker.giveUp = nil
     }
 
     private func reset() {
-        closeDecoder()
+        for worker in workers {
+            closeDecoder(worker)
+            worker.broken = false
+        }
         url = nil
         headers = [:]
         none = false
         wanted = nil
         spans = []
+        rowAsks = []
+        skipped = []
     }
 
+    private static let workerCount = 2
+    /// How many steps either side of the row's latest ask are found ahead.
+    private static let aheadSteps = 4
+    /// The row's asks older than this belong to an earlier scrub.
+    private static let rowWindow: TimeInterval = 10
+    private static let minStep: Int64 = 1000
     private static let askTimeout: TimeInterval = 10
     private static let idleTimeout: TimeInterval = 45
     private static let keptSpans = 4096
@@ -273,6 +371,8 @@ private final class ThumbnailDecoder {
 
     /// The first picture came, so seeks can go.
     private(set) var ready = false
+    /// The file's length, once it's loaded.
+    private(set) var durationMs: Int64?
     private var restarted = false
     private var fresh = false
     private var keyframeMs: Int64 = 0
@@ -381,6 +481,8 @@ private final class ThumbnailDecoder {
         ("untimed", "yes"),
         // Keyframes only, so each seek is one decode.
         ("hr-seek", "no"),
+        // Otherwise mpv decodes the frame after the keyframe too, and waits for the first to draw, before it restarts.
+        ("video-latency-hacks", "yes"),
         // Frames come back to memory for the software renderer.
         ("hwdec", "videotoolbox-copy"),
         ("hwdec-codecs", "all"),
@@ -432,7 +534,12 @@ private final class ThumbnailDecoder {
     private func handle(_ event: mpv_event) {
         switch event.event_id {
         case MPV_EVENT_FILE_LOADED:
-            if property("current-tracks/video/id") == nil { report(.failed("the file has no video")) }
+            if property("current-tracks/video/id") == nil { return report(.failed("the file has no video")) }
+            if let mpv {
+                var duration = 0.0
+                mpv_get_property(mpv, "duration", MPV_FORMAT_DOUBLE, &duration)
+                if duration > 0 { durationMs = Int64(duration * 1000) }
+            }
         case MPV_EVENT_PLAYBACK_RESTART:
             guard let mpv else { return }
             var position = 0.0
