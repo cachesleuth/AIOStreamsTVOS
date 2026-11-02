@@ -85,8 +85,11 @@ final class PictureInPicture: NSObject {
         guard !active, waiting == nil, !switchingMode else { return }
         pressedAt = CACurrentMediaTime()
         Self.trace = []
-        step("button pressed; \(inVideoMode ? "the video switched the TV" : "the TV is in the Home screen's mode"), "
-             + "\(window()?.avDisplayManager?.preferredDisplayCriteria == nil ? "no" : "has") display criteria")
+        // In steps: as one expression, the compiler can give up type-checking it.
+        let mode: String = inVideoMode ? "the video switched the TV" : "the TV is in the Home screen's mode"
+        let hasCriteria: Bool = window()?.avDisplayManager?.preferredDisplayCriteria != nil
+        let criteria: String = hasCriteria ? "has display criteria" : "no display criteria"
+        step("button pressed; " + mode + ", " + criteria)
         // Made now, so tvOS weighs up the window during the switch rather than after it.
         guard prepareController() != nil else {
             return failed("Picture-in-picture isn't available for this video.")
@@ -145,7 +148,8 @@ final class PictureInPicture: NSObject {
 
     private func begin(_ controller: AVPictureInPictureController) {
         guard controller === self.controller, !controller.isPictureInPictureActive else { return }
-        step(waiting != nil ? "tvOS allowed the window; starting it" : "window allowed; starting it")
+        let waited: Bool = waiting != nil
+        step(waited ? "tvOS allowed the window; starting it" : "window allowed; starting it")
         endWaiting()
         controller.startPictureInPicture()
     }
@@ -157,7 +161,8 @@ final class PictureInPicture: NSObject {
     private var pressedAt: CFTimeInterval = 0
 
     private func step(_ what: String) {
-        let line = String(format: "+%.2f s  %@", CACurrentMediaTime() - pressedAt, what)
+        let elapsed: Double = CACurrentMediaTime() - pressedAt
+        let line: String = String(format: "+%.2f s  ", elapsed) + what
         NSLog("[pip] %@", line)
         Self.trace.append(line)
         if Self.trace.count > 20 { Self.trace.removeFirst() }
@@ -165,7 +170,10 @@ final class PictureInPicture: NSObject {
 
     /// For the app menu: how long the last start took, step by step.
     static var report: [String] {
-        trace.isEmpty ? ["Picture in picture: not started yet"] : ["Picture in picture, last start:"] + trace
+        if trace.isEmpty { return ["Picture in picture: not started yet"] }
+        var lines: [String] = ["Picture in picture, last start:"]
+        lines.append(contentsOf: trace)
+        return lines
     }
 
     // MARK: Leaving for the Home screen
@@ -246,7 +254,8 @@ final class PictureInPicture: NSObject {
             self.modeWatch = nil
             if let observer = self.switchEnd { NotificationCenter.default.removeObserver(observer) }
             self.switchEnd = nil
-            self.step(String(format: "display mode %@ (%.2f s)", how, CACurrentMediaTime() - began))
+            let took: Double = CACurrentMediaTime() - began
+            self.step("display mode " + how + String(format: " (%.2f s)", took))
             if resume, self.channel.playing, self.player.engine.state != .playing {
                 self.step("the switch paused the video; playing it again")
                 self.channel.change(Change(paused: false))
