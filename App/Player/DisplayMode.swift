@@ -6,9 +6,9 @@ import UIKit
 /**
  * HDR10+ (SMPTE ST 2094-40) dynamic metadata. The HDR10+ MPVKit build's
  * vo_avfoundation attaches each frame's to its sample buffer, and tvOS passes
- * it to the TV with the HDR10 signal. The TV mode stays HDR10: tvOS has no
- * separate HDR10+ mode to ask for. vo_avfoundation says so in mpv's log once
- * per launch, on the first frame that carries it.
+ * it to the TV with the HDR10 signal. The mode asked for stays HDR10.
+ * vo_avfoundation says it passes the metadata in mpv's log once per launch,
+ * on the first frame that carries it.
  */
 enum HDR10Plus {
     static var seenSinceLaunch = false

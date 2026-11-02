@@ -53,8 +53,9 @@ page the same way:
 - **HDR10+** plays as HDR10 with its dynamic metadata. FFmpeg reads each frame's HDR10+ metadata,
   and the patched `vo_avfoundation` attaches it to the frame's sample buffer
   (`kCMSampleAttachmentKey_HDR10PlusPerFrameData`), so tvOS can pass it to a TV that takes HDR10+.
-  The TV mode asked for stays HDR10, as tvOS has no separate HDR10+ mode. The app menu and the
-  diagnostics say whether any HDR10+ metadata has gone to the TV since launch.
+  The app still asks tvOS for the HDR10 mode; it doesn't ask for an HDR10+ one. It needs an Apple
+  TV and a TV that both take HDR10+. The app menu and the diagnostics say whether any HDR10+
+  metadata has gone to the TV since launch.
 - **Dolby Vision** plays through its HDR10 base layer, so the TV shows HDR10, not Dolby Vision.
   That covers profile 8 (most streaming releases) and profile 7 (UHD Blu-ray remuxes). Real Dolby
   Vision output on Apple TV only comes from Apple's own player, which can't play what mpv plays.
