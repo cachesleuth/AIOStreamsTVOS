@@ -41,27 +41,71 @@ final class PictureInPicture: NSObject {
         self.engine = engine
         self.send = send
         super.init()
-        guard AVPictureInPictureController.isPictureInPictureSupported() else { return }
-        let source = AVPictureInPictureController.ContentSource(sampleBufferDisplayLayer: layer, playbackDelegate: self)
-        let controller = AVPictureInPictureController(contentSource: source)
-        controller.delegate = self
-        self.controller = controller
     }
+
+    private let supported = AVPictureInPictureController.isPictureInPictureSupported()
+    /// Watches for tvOS to allow the window after a press, and gives up after a while.
+    private var possible: NSKeyValueObservation?
+    private var waiting: DispatchWorkItem?
+    /// The layer's clock, there while the window starts or shows.
+    private var timebase: CMTimebase?
+    private var clockTimer: Timer?
 
     var active: Bool { controller?.isPictureInPictureActive == true }
 
     /// The player's button shows: a video plays and the page's setting allows it.
-    var offered: Bool { controller != nil && !active && player.playing && player.pictureInPictureAllowed }
+    var offered: Bool { supported && !active && player.playing && player.pictureInPictureAllowed }
 
+    /**
+     * tvOS only allows the window for a display layer with a clock it can read
+     * the position from, as MPVKit's demo gives it, and decides once the layer
+     * is on screen with frames in it. So each press gives the layer a clock
+     * that follows mpv, makes the controller then, and starts the window as
+     * soon as tvOS allows it. mpv stamps each frame with the clock's time, so
+     * frames still show as they come.
+     */
     func start() {
-        guard let controller else { return failed("This Apple TV has no picture-in-picture.") }
-        guard controller.isPictureInPicturePossible else {
-            return failed("Picture-in-picture isn't ready yet. Try again once the video is playing.")
+        guard supported else { return failed("This Apple TV has no picture-in-picture.") }
+        guard !active, waiting == nil else { return }
+        startClock()
+        let source = AVPictureInPictureController.ContentSource(sampleBufferDisplayLayer: layer, playbackDelegate: self)
+        let controller = AVPictureInPictureController(contentSource: source)
+        controller.delegate = self
+        self.controller = controller
+        if controller.isPictureInPicturePossible { return begin(controller) }
+        possible = controller.observe(\.isPictureInPicturePossible, options: [.new]) { [weak self] controller, _ in
+            guard controller.isPictureInPicturePossible else { return }
+            DispatchQueue.main.async { self?.begin(controller) }
         }
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, self.waiting != nil else { return }
+            self.endWaiting()
+            NSLog("[pip] tvOS didn't allow the window in time")
+            self.stopClock()
+            self.failed("Picture-in-picture isn't available for this video right now.")
+        }
+        waiting = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.allowTime, execute: item)
+    }
+
+    private func begin(_ controller: AVPictureInPictureController) {
+        guard controller === self.controller, !controller.isPictureInPictureActive else { return }
+        endWaiting()
         controller.startPictureInPicture()
     }
 
+    private func endWaiting() {
+        possible = nil
+        waiting?.cancel()
+        waiting = nil
+    }
+
     func stop() {
+        if waiting != nil {
+            // Still waiting for tvOS to allow it: the press is dropped.
+            endWaiting()
+            stopClock()
+        }
         guard active else { return }
         restoring = true
         controller?.stopPictureInPicture()
@@ -69,8 +113,47 @@ final class PictureInPicture: NSObject {
 
     /// Paused, resumed or a new length: the window's controls ask again.
     func playbackChanged() {
+        syncClock()
         if active { controller?.invalidatePlaybackState() }
     }
+
+    // MARK: The layer's clock
+
+    private func startClock() {
+        if timebase == nil {
+            var made: CMTimebase?
+            CMTimebaseCreateWithSourceClock(allocator: kCFAllocatorDefault, sourceClock: CMClockGetHostTimeClock(), timebaseOut: &made)
+            guard let made else { return }
+            timebase = made
+            layer.controlTimebase = made
+        }
+        syncClock(force: true)
+        clockTimer?.invalidate()
+        clockTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.syncClock() }
+    }
+
+    /// Follows mpv's position and rate, moved only when it has drifted, so frames don't jump.
+    private func syncClock(force: Bool = false) {
+        guard let timebase else { return }
+        let rate = player.paused ? 0 : player.speed
+        let at = player.positionMs / 1000
+        let now = CMTimeGetSeconds(CMTimebaseGetTime(timebase))
+        if force || !now.isFinite || abs(now - at) > 0.5 {
+            CMTimebaseSetTime(timebase, time: CMTime(seconds: at, preferredTimescale: 1000))
+        }
+        if force || CMTimebaseGetRate(timebase) != rate { CMTimebaseSetRate(timebase, rate: rate) }
+    }
+
+    /// Back to how the player shows frames outside the window.
+    private func stopClock() {
+        clockTimer?.invalidate()
+        clockTimer = nil
+        guard timebase != nil else { return }
+        layer.controlTimebase = nil
+        timebase = nil
+    }
+
+    private static let allowTime: TimeInterval = 4
 
     func appWillResignActive() {
         if active { left = true }
@@ -117,6 +200,8 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
         failedToStartPictureInPictureWithError error: Error
     ) {
         NSLog("[pip] didn't start: %@", error.localizedDescription)
+        endWaiting()
+        stopClock()
         failed("Picture-in-picture didn't start: \(error.localizedDescription)")
     }
 
@@ -130,6 +215,7 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
 
     func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
         status = nil
+        stopClock()
         subtitles?.stop()
         subtitles = nil
         // Closing the window, rather than bringing it back full size, stops playback, as on Android.
@@ -148,6 +234,7 @@ extension PictureInPicture: AVPictureInPictureSampleBufferPlaybackDelegate {
         player.change(Change(paused: !playing))
     }
 
+    /// On the layer's clock, which follows mpv's position, so the window's progress moves.
     func pictureInPictureControllerTimeRangeForPlayback(_ controller: AVPictureInPictureController) -> CMTimeRange {
         let duration = player.durationMs / 1000
         guard duration > 0 else { return CMTimeRange(start: .negativeInfinity, duration: .positiveInfinity) }

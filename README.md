@@ -100,6 +100,10 @@ rebuilds its controls, the script puts it back.
   app is back.
 - mpv's display layer goes into the window as it is (`AVPictureInPictureController`'s sample
   buffer source), as in MPVKit's demo, and subtitles are copied over it from mpv's subtitle layer.
+- tvOS only allows the window for a display layer with a clock it can read the position from, so
+  from the button press until the window closes the layer gets one that follows mpv's position and
+  speed (which also moves the window's progress bar). The controller is made at the press, and the
+  window starts as soon as tvOS allows it, or the app says it isn't available after 4 seconds.
 - The app has the `audio` background mode, which tvOS needs to keep playing in the window.
 
 ### Top Shelf

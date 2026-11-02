@@ -45,6 +45,9 @@ final class PlayerChannel: MPVEngineListener {
     /// Paused, resumed or a new length, for the picture-in-picture window's controls.
     var onPlaybackChanged: () -> Void = {}
 
+    var positionMs: Double { state.number("positionMs") ?? 0 }
+    var speed: Double { state.number("speed") ?? 1 }
+
     /// From the picture-in-picture window, which the page can't see while it shows.
     func skip(byMs offset: Double) {
         let to = max(0, (state.number("positionMs") ?? 0) + offset)
