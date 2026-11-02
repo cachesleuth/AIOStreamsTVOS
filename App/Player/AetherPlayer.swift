@@ -171,10 +171,11 @@ final class AetherPlayer {
         options.audioShaping = shaping
         options.audioDelaySeconds = settings.audioDelayMs / 1000
         if !settings.hardwareDecoding { options.preferredDecodePath = .software }
-        // On a TV without Dolby Vision, Dolby Vision plays as its HDR10 / HLG base layer, HDR10+ metadata
-        // included: no Profile 7 -> 8.1 RPU conversion and no Dolby Vision in the container, so AVPlayer
-        // composes nothing per frame. A Dolby Vision TV keeps Dolby Vision; Profile 5 keeps it everywhere.
-        if !AetherEngine.displayCapabilities.supportsDolbyVision {
+        // Dolby Vision plays as its HDR10 / HLG base layer, HDR10+ metadata included, on a TV without Dolby
+        // Vision always and on a Dolby Vision TV when the page's Dolby Vision switch is off: no Profile 7 ->
+        // 8.1 RPU conversion and no Dolby Vision in the container, so AVPlayer composes nothing per frame.
+        // Profile 5 has no base layer and keeps Dolby Vision either way.
+        if !settings.dolbyVision || !AetherEngine.displayCapabilities.supportsDolbyVision {
             options.dolbyVisionHandling = .baseLayerOnly
         }
         options.heldSourceConnection = Self.heldSourceConnection

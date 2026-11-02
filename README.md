@@ -90,7 +90,8 @@ from the next video.
   playback stops. tvOS only switches with **Settings → Video and Audio → Match Content** (Dynamic
   Range, and Frame Rate if you want that too) turned on.
 - **Dolby Vision** reaches a Dolby Vision TV in its own mode; profile 7 plays as single-layer
-  profile 8.1. On a TV without Dolby Vision it plays as its base layer (AetherEngine's
+  profile 8.1. The page's **Dolby Vision** switch (playback settings, Video) turned off plays the
+  base layer there instead, from the next video. On a TV without Dolby Vision it always plays as its base layer (AetherEngine's
   `dolbyVisionHandling = .baseLayerOnly`): profiles 7, 8.1 and 8.4 as HDR10 (with any HDR10+
   metadata) or HLG, with no profile 7 to 8.1 conversion and no Dolby Vision work for AVPlayer per
   frame. Profile 5 has no base layer and keeps playing as Dolby Vision, tone-mapped by AVPlayer.

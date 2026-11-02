@@ -71,6 +71,8 @@ struct Style {
 /// The settings the page sends that the player applies itself.
 struct PlayerSettings: Equatable {
     var hardwareDecoding = true
+    /// The page's Dolby Vision switch: off plays the HDR10 / HLG base layer on a Dolby Vision TV too.
+    var dolbyVision = true
     /// `auto`, `stereo`, `5.1` or `7.1`.
     var audioChannels = "auto"
     /// The formats the receiver takes, in mpv's `audio-spdif` names: `ac3`, `eac3`, `dts`, `dts-hd`, `truehd`.
@@ -153,6 +155,7 @@ enum PlayerProtocol {
     static func settings(_ message: Message) -> PlayerSettings {
         var settings = PlayerSettings()
         settings.hardwareDecoding = message.flag("hardwareDecoding") != false
+        settings.dolbyVision = message.flag("dolbyVision") != false
         settings.audioChannels = message.text("audioChannels") ?? "auto"
         settings.passthroughAuto = message.flag("passthroughAuto") == true
         if !settings.passthroughAuto {
