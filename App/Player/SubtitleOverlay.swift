@@ -150,7 +150,19 @@ final class SubtitleOverlay: UIView {
 
     private func units(_ rect: CGRect) -> CGFloat { rect.height / 720 }
 
-    private func attributed(_ runs: [SubtitleRun]) -> NSAttributedString {
+    /**
+     * A cue's text, drawn as two layers the way libass draws it: the outline
+     * behind, and the fill on top of it. The `back` layer is the glyphs filled
+     * and stroked in the outline colour; a stroke straddles the glyph edge, so
+     * the fill laid over it hides the inner half and leaves the outline outside
+     * the letters, at full letter width. Nil when there's no outline.
+     */
+    private struct CueText {
+        var front: NSAttributedString
+        var back: NSAttributedString?
+    }
+
+    private func attributed(_ runs: [SubtitleRun]) -> CueText {
         let look = look
         let unit = units(videoRect())
         let size = max(12, Self.fontUnits * CGFloat(look?.scale ?? 1) * unit)
@@ -160,7 +172,17 @@ final class SubtitleOverlay: UIView {
         let shadowSize = CGFloat(look?.shadowSize ?? 0) * unit
         let forced = look?.forceStyle == true
 
+        var shadow: NSShadow?
+        if shadowSize > 0 {
+            let made = NSShadow()
+            made.shadowColor = outlineColor
+            made.shadowOffset = CGSize(width: shadowSize, height: shadowSize)
+            made.shadowBlurRadius = 0
+            shadow = made
+        }
+
         let text = NSMutableAttributedString()
+        let back = NSMutableAttributedString()
         for run in runs {
             var traits: UIFontDescriptor.SymbolicTraits = []
             if run.bold || look?.bold == true { traits.insert(.traitBold) }
@@ -176,23 +198,24 @@ final class SubtitleOverlay: UIView {
                 .font: font,
                 .foregroundColor: color,
             ]
-            if outline > 0 {
-                // A negative width fills and strokes; the stroke straddles the edge, so it's twice the outline.
-                attributes[.strokeColor] = outlineColor
-                attributes[.strokeWidth] = -min(30, 2 * outline / size * 100)
-            }
-            if shadowSize > 0 {
-                let shadow = NSShadow()
-                shadow.shadowColor = outlineColor
-                shadow.shadowOffset = CGSize(width: shadowSize, height: shadowSize)
-                shadow.shadowBlurRadius = 0
-                attributes[.shadow] = shadow
-            }
             if run.underline && !forced { attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue }
             if run.strike && !forced { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
+            if outline > 0 {
+                // The outline layer: filled and stroked in the outline colour. A negative width
+                // fills and strokes; the stroke straddles the edge, so it's twice the outline.
+                // The shadow goes here, so it's cast by the outlined shape once.
+                var outlined = attributes
+                outlined[.foregroundColor] = outlineColor
+                outlined[.strokeColor] = outlineColor
+                outlined[.strokeWidth] = -min(30, 2 * outline / size * 100)
+                if let shadow { outlined[.shadow] = shadow }
+                back.append(NSAttributedString(string: run.text, attributes: outlined))
+            } else if let shadow {
+                attributes[.shadow] = shadow
+            }
             text.append(NSAttributedString(string: run.text, attributes: attributes))
         }
-        return text
+        return CueText(front: text, back: outline > 0 ? back : nil)
     }
 
     /**
@@ -201,9 +224,10 @@ final class SubtitleOverlay: UIView {
      * 4–6 middle, 1–3 bottom; 1, 4 and 7 left, 3, 6 and 9 right.
      */
     private func placeText(
-        _ text: NSAttributedString, _ placement: SubtitleTextPlacement?, in picture: CGRect,
+        _ cue: CueText, _ placement: SubtitleTextPlacement?, in picture: CGRect,
         stacks: inout [Int: CGFloat]
     ) {
+        let text = cue.front
         guard text.length > 0 else { return }
         // Cropped, the picture runs off the screen; the text stays on it.
         let rect = cropped ? picture.intersection(bounds) : picture
@@ -213,14 +237,20 @@ final class SubtitleOverlay: UIView {
         let row = (alignment - 1) / 3  // 0 bottom, 1 middle, 2 top
         let column = (alignment - 1) % 3  // 0 left, 1 centre, 2 right
 
-        let aligned = NSMutableAttributedString(attributedString: text)
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = column == 0 ? .left : column == 2 ? .right : .center
         paragraph.lineBreakMode = .byWordWrapping
-        aligned.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: aligned.length))
-        let label = UILabel()
-        label.numberOfLines = 0
-        label.attributedText = aligned
+        func makeLabel(_ text: NSAttributedString) -> UILabel {
+            let aligned = NSMutableAttributedString(attributedString: text)
+            aligned.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: aligned.length))
+            let label = UILabel()
+            label.numberOfLines = 0
+            label.attributedText = aligned
+            return label
+        }
+        // Both layers hold the same glyphs in the same font, so they wrap and measure alike.
+        let label = makeLabel(text)
+        let outlineLabel = cue.back.map(makeLabel)
         let maxWidth = rect.width - 2 * margin
         var size = label.sizeThatFits(CGSize(width: maxWidth, height: .greatestFiniteMagnitude))
         size.width = min(size.width, maxWidth)
@@ -260,7 +290,12 @@ final class SubtitleOverlay: UIView {
             }
         }
         box.frame = CGRect(origin: origin, size: boxSize)
-        label.frame = CGRect(x: pad, y: pad / 2, width: size.width, height: size.height)
+        let labelFrame = CGRect(x: pad, y: pad / 2, width: size.width, height: size.height)
+        if let outlineLabel {
+            outlineLabel.frame = labelFrame
+            box.addSubview(outlineLabel)
+        }
+        label.frame = labelFrame
         box.addSubview(label)
         addSubview(box)
     }
