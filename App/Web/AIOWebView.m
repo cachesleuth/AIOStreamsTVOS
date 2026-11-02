@@ -154,14 +154,18 @@ static NSString *AIOMimeType(NSString *extension) {
     NSString *rootPath = self.root.URLByStandardizingPath.path;
     NSURL *file = [self.root URLByAppendingPathComponent:[path substringFromIndex:1]].URLByStandardizingPath;
     NSData *data = nil;
-    // Nothing outside the bundled build.
-    if ([file.path hasPrefix:[rootPath stringByAppendingString:@"/"]]) {
+    if ([path hasPrefix:@"/thumbnail/"]) {
+        // Seek-bar thumbnails the player made, which the page was sent the paths of.
+        AIOWebView *owner = self.owner;
+        if (owner.thumbnailAtPath) data = owner.thumbnailAtPath(path);
+    } else if ([file.path hasPrefix:[rootPath stringByAppendingString:@"/"]]) {
+        // Nothing outside the bundled build.
         data = [NSData dataWithContentsOfURL:file];
     }
     NSInteger status = data ? 200 : 404;
     data = data ?: [NSData data];
     NSDictionary *headers = @{
-        @"Content-Type": data.length ? AIOMimeType(file.pathExtension) : @"text/plain",
+        @"Content-Type": data.length ? AIOMimeType(path.pathExtension) : @"text/plain",
         @"Content-Length": [NSString stringWithFormat:@"%lu", (unsigned long)data.length],
         @"Cache-Control": @"no-cache",
     };

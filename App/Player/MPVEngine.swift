@@ -527,7 +527,7 @@ final class MPVEngine {
     }
 
     /// mpv's `http-header-fields` for the headers; the length prefix keeps the list's commas in one option.
-    private static func headerFields(_ headers: [String: String]) -> String? {
+    static func headerFields(_ headers: [String: String]) -> String? {
         guard !headers.isEmpty else { return nil }
         let list = headers.map { "\($0.key): \($0.value.replacingOccurrences(of: ",", with: "\\,"))" }
             .joined(separator: ",")

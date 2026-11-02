@@ -84,6 +84,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
         web.onServed = { path, status, _ in
             if status != 200 { NSLog("[web] %ld for %@", status, path) }
         }
+        web.thumbnailAtPath = { ThumbnailStore.image($0) }
 
         startPlayer()
         setUpInput()

@@ -23,6 +23,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) void (^onOpenURL)(NSURL *url);
 /** A file the app served, or failed to. */
 @property (nonatomic, copy, nullable) void (^onServed)(NSString *path, NSInteger status, NSUInteger bytes);
+/** The JPEG the app serves at a `/thumbnail/` path, or nil; called on the main thread. */
+@property (nonatomic, copy, nullable) NSData *_Nullable (^thumbnailAtPath)(NSString *path);
 /** In place of WebKit's own user agent. */
 @property (nonatomic, copy, nullable) NSString *userAgent;
 

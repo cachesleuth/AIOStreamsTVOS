@@ -174,7 +174,7 @@ enum PlayerProtocol {
         charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&'*+-.^_`|~"
     )
 
-    private static func headers(_ value: Any?) throws -> [String: String] {
+    static func headers(_ value: Any?) throws -> [String: String] {
         guard let map = value as? Message else { return [:] }
         var headers: [String: String] = [:]
         for (name, raw) in map {

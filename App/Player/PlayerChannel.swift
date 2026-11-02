@@ -10,6 +10,8 @@ final class PlayerChannel: MPVEngineListener {
     private let showVideo: (Bool) -> Void
     private let subtitlesDir: URL
     let nowPlaying: NowPlaying
+    /// Seek-bar thumbnails, made by a second mpv apart from the one playing.
+    private let thumbnails: Thumbnails
 
     private var state: Message = [:]
     private var tracks: [Message] = []
@@ -25,6 +27,7 @@ final class PlayerChannel: MPVEngineListener {
         self.send = send
         self.showVideo = showVideo
         nowPlaying = NowPlaying(send: send)
+        thumbnails = Thumbnails(send: send)
         engine.listener = self
     }
 
@@ -50,6 +53,7 @@ final class PlayerChannel: MPVEngineListener {
                 loaded = false
                 onStatsPage(nil)
                 engine.stop()
+                thumbnails.close()
                 updateIdleTimer()
                 endVideo()
             case "player-set":
@@ -82,9 +86,16 @@ final class PlayerChannel: MPVEngineListener {
                     showVideo(false)
                     endVideo()
                 }
-            // No seek-bar thumbnails or subtitle index here: the page goes without them.
             case "player-thumbnail":
-                send(["type": "player-thumbnail", "url": message.text("url") ?? "", "src": NSNull()])
+                let url = message.text("url") ?? ""
+                guard PlayerProtocol.isWebURL(url) else { throw ProtocolError("only http(s) files have thumbnails") }
+                thumbnails.want(
+                    url: url,
+                    headers: try PlayerProtocol.headers(message["headers"]),
+                    positionMs: message.number("positionMs"),
+                    showingMs: message.number("showingMs")
+                )
+            // No subtitle index here: the page goes without it.
             case "player-subtitle-index":
                 send(["type": "player-subtitle-index", "tracks": NSNull()])
             case "player-stats-overlay":

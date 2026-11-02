@@ -62,6 +62,20 @@ YouTube trailers play in mpv. The app asks YouTube's player API for the video's 
 AIOStreams' desktop and Android apps do (`App/Player/YouTube.swift`). Where YouTube gives none,
 the page opens the trailer's link, which goes to the YouTube app if it's installed.
 
+### Seek-bar thumbnails
+
+Seeking shows a picture of the keyframe at or before the position, over the seek bar and in the
+remote's scrub row, as in AIOStreams' desktop and Android apps. The app answers the page's
+`player-thumbnail` asks the way those apps do: the newest ask wins, the picture on screen isn't
+sent again, and each picture is a 384-pixel-wide JPEG the page loads from
+`aiostv://localhost/thumbnail/…` (the newest 256 are kept).
+
+Those apps make the pictures with AIOStreams' own keyframe reader, which loads FFmpeg as a shared
+library. tvOS's FFmpeg is linked into MPVKit, so a second, silent mpv makes them here
+(`App/Player/Thumbnails.swift`): it opens the file paused with no audio or cache, seeks to keyframes
+only, and renders each through libmpv's software renderer. HDR10 and HLG pictures are tone mapped
+to SDR. It closes after 45 seconds without an ask, and opens the file again on the next one.
+
 ### Top Shelf
 
 With the app in the top row of the home screen, the Top Shelf shows **Continue Watching** and
