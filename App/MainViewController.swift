@@ -277,10 +277,13 @@ final class MainViewController: UIViewController, RemoteReceiver {
     /// With how the video plays and what the TV was asked for, to see why HDR doesn't reach the TV.
     private func presentAppMenu(video: [String: String]) {
         guard presentedViewController == nil else { return }
-        let lines = ["App \(Identity.version) · web app \(WebApp.commit) · \(storage.keyCount) saved keys", ""]
-            + AppAnswers.videoLines(video, window: view.window) + [""]
-            + MemoryLog.report + [""]
-            + TopShelf.report
+        // In steps: as one expression, the compiler gives up type-checking it.
+        var lines: [String] = ["App \(Identity.version) · web app \(WebApp.commit) · \(storage.keyCount) saved keys", ""]
+        lines += AppAnswers.videoLines(video, window: view.window)
+        lines.append("")
+        lines += MemoryLog.report
+        lines.append("")
+        lines += TopShelf.report
         let menu = AppMenu(title: "AIOStreams", text: lines.joined(separator: "\n"), actions: [
             AppMenu.Action(title: "Reload", destructive: false) { [weak self] in self?.loadPage() },
             AppMenu.Action(title: "Reset the app's data", destructive: true) { [weak self] in self?.confirmReset() },

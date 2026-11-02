@@ -124,7 +124,7 @@ final class AppMenu: UIViewController {
 private final class ScrollingText: UITextView {
     init() {
         super.init(frame: .zero, textContainer: nil)
-        isEditable = false
+        // tvOS text views are never editable, so there's no `isEditable` to turn off.
         isSelectable = false
         isScrollEnabled = true
         isUserInteractionEnabled = true
