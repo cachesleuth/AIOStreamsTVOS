@@ -36,6 +36,15 @@ final class PlayerChannel: PlayerListener {
     /// A file is loaded, playing or paused.
     var playing: Bool { loaded }
 
+    /// The page's Picture-in-picture setting, from the item playing.
+    private(set) var pictureInPictureAllowed = false
+
+    /// The page closed the player, so a picture-in-picture window has nothing left to show.
+    var onStopped: () -> Void = {}
+
+    /// A video started, loaded or came back from a seek, which can make picture in picture possible.
+    var onPlayerEvent: () -> Void = {}
+
     func change(_ change: Change) {
         player.change(change)
     }
@@ -51,6 +60,7 @@ final class PlayerChannel: PlayerListener {
                 player.load(request)
             case "player-stop":
                 loaded = false
+                onStopped()
                 player.stop()
                 thumbnails.close()
                 updateIdleTimer()
@@ -86,6 +96,7 @@ final class PlayerChannel: PlayerListener {
             case "now-playing":
                 let item = message.object("item")
                 nowPlaying.setItem(item)
+                pictureInPictureAllowed = item?.flag("pip") == true
                 if item == nil { showVideo(false) }
             case "player-thumbnail":
                 let url = message.text("url") ?? ""
@@ -149,6 +160,7 @@ final class PlayerChannel: PlayerListener {
 
     func playerEvent(_ name: String) {
         send(["type": "player-event", "name": name])
+        onPlayerEvent()
     }
 
     func playerEnded(reason: String, error: String?, cause: String?, status: Int?) {

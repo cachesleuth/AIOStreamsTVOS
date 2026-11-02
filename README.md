@@ -120,10 +120,27 @@ the next one.
 
 ### Picture in picture
 
-There is none yet, and the page's setting is hidden (`pip: false` in the bridge script). mpv's
-display layer could never go in tvOS's window (Apple feedback FB9751461); the engine's AVPlayer
-layer can in principle, but it isn't wired up, and the long-form audio policy the engine declares
-for HDMI is known to block picture in picture on iOS and is untested here on tvOS.
+While a video plays, the **picture-in-picture button** at the end of the player's bottom row moves
+it into a small window, and the app steps back to the Home screen; the video keeps playing over the
+Home screen and other apps (`App/Player/PictureInPicture.swift`). This is the Android app's
+picture-in-picture: the page's **Settings → Android app → Picture-in-picture** switch allows it,
+and the page hides its player while the window shows. tvOS only starts it from inside an app, so
+the bridge script adds the button to the page's controls, in the look of the page's own.
+
+- The window holds AetherEngine's AVPlayer layer (`nativePlayerLayer`), and its play/pause and
+  skip buttons drive AVPlayer directly; the page catches up when the app is back.
+- Only videos the engine plays through AVPlayer get the button. One it decodes itself (its
+  software route) draws into a sample buffer display layer, which tvOS never puts in the window
+  (Apple feedback FB9751461, which also kept mpv out).
+- Text subtitles show in the window through the engine's native subtitle rendition
+  (`prepareNativeSubtitles`), selected only while the window shows; picture subtitles (PGS, DVD)
+  and ASS styling don't, as the app's overlay can't leave the app.
+- Opening the app again, or the window's full-screen button, puts the video back in the app.
+  Closing the window pauses the video, as on Android.
+- The app has the `audio` background mode, which tvOS needs to keep playing in the window, and the
+  engine keeps its session through the background while the window shows.
+- Untested: the engine declares the long-form audio policy for HDMI, which blocks picture in
+  picture on iOS. If tvOS does the same, the button says it isn't available after 4 seconds.
 
 ### Top Shelf
 
@@ -170,7 +187,8 @@ app on a TV (`platform: 'android'`, `tv: true`). That gets the TV layout, remote
 Back behaviour and the bundled-player path. It also means:
 
 - Jellyfin lists the device as **AIOStreams Android TV**.
-- Settings shows an **Android app** section. Updates show as off, **Play in the background** does
+- Settings shows an **Android app** section. Its **Picture-in-picture** switch works (it shows the
+  app's button in the player). Updates show as off, **Play in the background** does
   nothing (leaving the app pauses the video), and its mpv.conf editor, shown while the player
   engine setting says mpv, says that nothing in it applies.
 - Android-only playback settings (frame rate matching, tunnelling) show and do nothing.

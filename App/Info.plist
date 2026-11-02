@@ -46,6 +46,11 @@
 			</array>
 		</dict>
 	</dict>
+	<!-- Picture in picture keeps playing with the app in the background. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<!-- aiostreams:// links: external players hand back where they stopped, and the web app's own links. -->
 	<key>CFBundleURLTypes</key>
 	<array>

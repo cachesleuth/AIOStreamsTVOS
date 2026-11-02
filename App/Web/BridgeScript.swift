@@ -137,8 +137,8 @@ enum BridgeScript {
     tv: true,
     voice: false,
     gamepads: false,
-    // Hides the page's Picture-in-picture setting: the app has none (see the README). The button below stays unused until it does.
-    pip: false,
+    // Shows the page's Picture-in-picture setting; the app's button in the player starts the window (PictureInPicture.swift).
+    pip: true,
     device: __DEVICE__,
     deviceId: __DEVICE_ID__,
     send,

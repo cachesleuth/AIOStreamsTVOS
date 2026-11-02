@@ -15,6 +15,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
     private let status = UILabel()
     private var engine: AetherPlayer?
     private var player: PlayerChannel?
+    private var pip: PictureInPicture?
     private let input = RemoteInput()
     private let storage = WebStorage()
     /// The page has said hello, so it takes Back.
@@ -150,6 +151,17 @@ final class MainViewController: UIViewController, RemoteReceiver {
         web?.evaluateJavaScript("window.__aioReceive&&window.__aioReceive(\(json))")
     }
 
+    /// What the page was last told about the player's picture-in-picture button.
+    private var pipButtonShown = false
+
+    /// Shown while a video plays on the engine's AVPlayer and the page's Picture-in-picture setting is on.
+    private func updatePipButton() {
+        let offered = pip?.offered == true
+        guard offered != pipButtonShown else { return }
+        pipButtonShown = offered
+        callTV("pip(\(offered))")
+    }
+
     private func callTV(_ call: String) {
         web?.evaluateJavaScript("window.__aioTV&&window.__aioTV.\(call)")
     }
@@ -165,7 +177,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
             let engine = try AetherPlayer(view: videoView, subtitles: subtitleView)
             self.engine = engine
             // Match Content's HDR10, HLG, Dolby Vision and frame rate are the engine's own to ask tvOS for.
-            player = PlayerChannel(
+            let player = PlayerChannel(
                 player: engine,
                 subtitlesDir: AppFolders.subtitles,
                 send: { [weak self] in self?.sendToPage($0) },
@@ -174,6 +186,17 @@ final class MainViewController: UIViewController, RemoteReceiver {
                     self?.subtitleView.isHidden = !shown
                 }
             )
+            self.player = player
+            let pip = PictureInPicture(player: engine, channel: player, send: { [weak self] in self?.sendToPage($0) })
+            pip.failed = { [weak self] in self?.flashStatus($0) }
+            pip.ended = { [weak self] in
+                self?.web?.focusPage()
+                self?.updatePipButton()
+            }
+            player.onStopped = { [weak pip] in pip?.stop() }
+            // The engine's AVPlayer layer is there once a video has loaded.
+            player.onPlayerEvent = { [weak self] in self?.updatePipButton() }
+            self.pip = pip
         } catch {
             NSLog("[app] AetherEngine did not start: %@", String(describing: error))
         }
@@ -343,12 +366,21 @@ final class MainViewController: UIViewController, RemoteReceiver {
 
     private func receive(_ message: Message) {
         guard let type = message.text("type") else { return }
-        if player?.handle(type, message) == true { return }
+        if player?.handle(type, message) == true {
+            // A load, a stop or a new item may show or hide the player's picture-in-picture button.
+            updatePipButton()
+            return
+        }
         switch type {
         case "hello":
             connected = true
             status.isHidden = true
             web?.focusPage()
+            pipButtonShown = false
+            updatePipButton()
+        case "tvos-pip":
+            // The player's picture-in-picture button, which the bridge script adds.
+            pip?.start()
         case "app-info":
             sendToPage(AppAnswers.appInfo())
         case "player-engine":
@@ -407,11 +439,15 @@ final class MainViewController: UIViewController, RemoteReceiver {
     func appWillResignActive() {
         storage.save()
         input.stopRepeating()
-        player?.change(Change(paused: true))
+        pip?.appWillResignActive()
+        // The picture-in-picture window keeps playing over the Home screen.
+        if pip?.active != true { player?.change(Change(paused: true)) }
     }
 
-    /// The player opens a video again that tvOS made it let go of in the background (`AetherPlayer`).
+    /// The player opens a video again that tvOS made it let go of in the background (`AetherPlayer`);
+    /// a picture-in-picture window comes back into the app.
     func appDidBecomeActive() {
+        pip?.appDidBecomeActive()
         web?.focusPage()
     }
 }

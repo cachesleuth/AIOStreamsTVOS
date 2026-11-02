@@ -156,6 +156,9 @@ final class AetherPlayer {
         if !settings.hardwareDecoding { options.preferredDecodePath = .software }
         // ASS and SSA cues come as their event lines, for libass (`SubtitleOverlay`); other formats are unaffected.
         options.preserveASSMarkup = true
+        // A text subtitle rendition AVPlayer can show itself, for the picture-in-picture window, where the
+        // app's overlay can't go. Selected only while the window shows (`setPictureInPicture`).
+        options.prepareNativeSubtitles = true
         return options
     }
 
@@ -578,6 +581,23 @@ final class AetherPlayer {
         }
     }
 
+    // MARK: Picture in picture
+
+    /// The background began with the picture-in-picture window showing, and it hasn't closed out there.
+    private var heldByWindow = false
+
+    /**
+     * The window shows or has gone (`PictureInPicture`). The engine keeps the
+     * session through the background while it shows, and AVPlayer draws the
+     * text subtitles in it from the engine's native rendition.
+     */
+    func setPictureInPicture(_ on: Bool) {
+        engine.pictureInPictureActive = on
+        engine.setNativeSubtitleRendering(on)
+        // Closed out in the background: the engine lets the video go, so it's opened again on the way back.
+        if !on, UIApplication.shared.applicationState == .background { heldByWindow = false }
+    }
+
     // MARK: Background
 
     /**
@@ -588,11 +608,17 @@ final class AetherPlayer {
      */
     private func enteredBackground() {
         leftWithFile = current != nil && !ended
+        heldByWindow = engine.pictureInPictureActive
     }
 
     private func becameActive() {
         guard leftWithFile else { return }
         leftWithFile = false
+        // The picture-in-picture window kept the session running the whole time.
+        if heldByWindow {
+            heldByWindow = false
+            return
+        }
         guard current != nil, !ended else { return }
         let generation = generation
         Task { [weak self] in
