@@ -29,7 +29,14 @@ struct PlaybackHealth {
     private(set) var stalls = 0
     private(set) var lastStallAt: Date?
 
+    /// Seconds the file has played for, from the 1 Hz ticks, for an estimate of the frames shown.
+    private(set) var playedSeconds: Double = 0
+    private var lastTick: TimeInterval?
+
     mutating func record(_ telemetry: LiveTelemetry, playing: Bool, at now: TimeInterval) {
+        // A gap longer than a couple of ticks is the app away or the sampler stopped, not playing.
+        if playing, let lastTick { playedSeconds += min(max(0, now - lastTick), 2) }
+        lastTick = now
         latest = telemetry
         // A reload starts the session's counters again; figures across it would be nonsense.
         if let last = samples.last, telemetry.demuxerBytesFetched < last.sourceBytes {

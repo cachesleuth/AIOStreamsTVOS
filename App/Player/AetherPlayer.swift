@@ -770,7 +770,17 @@ final class AetherPlayer {
             if let profile = engine.sourceDVProfile { route = "Dolby Vision profile \(profile) as " + route }
             stats["dolbyVisionRoute"] = route
         }
-        stats["hdrTypes"] = Self.hdrType(engine.videoFormat).map { [$0] } ?? []
+        // What the TV can show, as Android lists its display's HDR types. tvOS reports no HDR10+ capability,
+        // so HDR10+ is listed while it's the mode playing. Dolby Vision profiles are the Apple TV's decoder's:
+        // every Apple TV 4K decodes profiles 5 and 8 itself, whatever the TV.
+        let display = AetherEngine.displayCapabilities
+        var hdrTypes: [Int] = []
+        if display.supportsDolbyVision { hdrTypes.append(1) }
+        if display.supportsHDR10 { hdrTypes.append(2) }
+        if display.supportsHLG { hdrTypes.append(3) }
+        if let playing = Self.hdrType(engine.videoFormat), !hdrTypes.contains(playing) { hdrTypes.append(playing) }
+        stats["hdrTypes"] = hdrTypes.sorted()
+        stats["dolbyVisionProfiles"] = [5, 8]
         if let audio = activeAudio {
             stats["audioMime"] = Self.audioMime(audio)
             stats["channels"] = audio.channels
@@ -796,7 +806,14 @@ final class AetherPlayer {
         }
         if let telemetry = engine.liveTelemetry {
             if let ahead = telemetry.forwardBufferSeconds { stats["bufferedMs"] = ahead * 1000 }
-            if let dropped = telemetry.droppedFrameCount { stats["droppedFrames"] = dropped }
+            if let dropped = telemetry.droppedFrameCount {
+                stats["droppedFrames"] = dropped
+                // AVPlayer counts the frames it drops, not those it shows: the shown are estimated from the
+                // time played at the file's frame rate, less the dropped, for the page's Frames line.
+                if let fps = engine.sourceVideoFrameRate, fps > 0, health.playedSeconds > 0 {
+                    stats["renderedFrames"] = max(0, Int((health.playedSeconds * fps).rounded()) - dropped)
+                }
+            }
         }
         return ["type": "player-stats", "stats": stats, "cpuMs": Self.cpuMs, "atMs": Date().timeIntervalSince1970 * 1000]
     }
