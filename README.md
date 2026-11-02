@@ -111,6 +111,12 @@ MKV aren't read, as the engine doesn't hand them over, so a typeset that names o
 nearest tvOS font. When the page forces its style on ASS, they're drawn as plain text in that
 style instead.
 
+The page's automatic subtitle sync lines an added subtitle (an addon's, the server's or your own)
+up with one of the file's own tracks. The app answers its `player-subtitle-lines` asks: the engine
+decodes that track on its second subtitle channel, without drawing it, and the app sends the page
+each line's start and end as it comes. A file with no subtitles of its own has nothing to sync
+against.
+
 ### Trailers
 
 YouTube trailers play in the player. The app asks YouTube's player API for the video's stream, as

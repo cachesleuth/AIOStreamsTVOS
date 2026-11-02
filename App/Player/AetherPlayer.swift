@@ -126,6 +126,8 @@ final class AetherPlayer {
         ended = false
         addedSubtitles = [:]
         lastBuffered = nil
+        // The page asks again for the next file's reference track.
+        endLineWatch()
         health = PlaybackHealth()
         subtitles.reset()
         listener?.playerEvent("start")
@@ -235,6 +237,7 @@ final class AetherPlayer {
         loading = nil
         queued = nil
         let wasPlaying = current != nil && !ended
+        endLineWatch()
         current = nil
         ended = true
         engine.stop()
@@ -538,6 +541,49 @@ final class AetherPlayer {
             state["buffered"] = ahead > seconds ? [["startMs": seconds * 1000, "endMs": ahead * 1000]] : []
         }
         listener?.playerState(state)
+    }
+
+    // MARK: Reference lines
+
+    /// The file's own subtitle track the page is lining an added one up against, decoded beside the one
+    /// shown and never drawn, and the lines already handed over.
+    private var watchedTrack: Int?
+    private var sentLines = Set<String>()
+    private var lineWatch: AnyCancellable?
+
+    /**
+     * The page's `player-subtitle-lines`: the times of `id`'s lines as they come, for its automatic
+     * subtitle sync, which compares them with an added subtitle's. The engine decodes the track on its
+     * second subtitle channel, so what's on screen is untouched. Nil, or a track that isn't the file's
+     * own, stops.
+     */
+    func watchLines(track id: String?, onLines: @escaping ([Message]) -> Void) {
+        endLineWatch()
+        guard current != nil, !ended, let id, let index = Int(id),
+              engine.subtitleTracks.contains(where: { $0.id == index && !$0.isExternal }) else { return }
+        watchedTrack = index
+        engine.selectSecondarySubtitleTrack(index: index)
+        lineWatch = engine.$secondarySubtitleCues.sink { [weak self] cues in
+            guard let self, self.watchedTrack == index else { return }
+            var lines: [(start: Double, end: Double)] = []
+            for cue in cues where cue.endTime > cue.startTime {
+                // Cues come again as the decoded window moves; each line goes once.
+                guard self.sentLines.insert("\(cue.startTime)|\(cue.endTime)").inserted else { continue }
+                lines.append((cue.startTime, cue.endTime))
+            }
+            guard !lines.isEmpty else { return }
+            onLines(lines.sorted { $0.start < $1.start }.map { line -> Message in
+                ["startMs": line.start * 1000, "endMs": line.end * 1000]
+            })
+        }
+    }
+
+    private func endLineWatch() {
+        lineWatch = nil
+        sentLines = []
+        guard watchedTrack != nil else { return }
+        watchedTrack = nil
+        engine.clearSecondarySubtitle()
     }
 
     private func reportTracks() {

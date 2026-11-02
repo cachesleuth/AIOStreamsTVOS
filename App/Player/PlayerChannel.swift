@@ -110,7 +110,14 @@ final class PlayerChannel: PlayerListener {
             // No subtitle index here: the page goes without it.
             case "player-subtitle-index":
                 send(["type": "player-subtitle-index", "tracks": NSNull()])
-            case "player-stats-overlay", "player-subtitle-lines", "player-skips",
+            // The file's own track's line times, for the page's automatic subtitle sync; no track stops.
+            case "player-subtitle-lines":
+                let track = message.text("track")
+                player.watchLines(track: track) { [weak self] lines in
+                    guard let track else { return }
+                    self?.send(["type": "player-subtitle-lines", "track": track, "lines": lines])
+                }
+            case "player-stats-overlay", "player-skips",
                  "player-controls", "player-retry", "player-unqueue":
                 break
             default:
