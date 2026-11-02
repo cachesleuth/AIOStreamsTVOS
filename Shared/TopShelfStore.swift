@@ -103,6 +103,9 @@ enum TopShelfStore {
         return wrote
     }
 
+    /// The app has written a list, even an empty one, where this process can read it.
+    static var hasList: Bool { newest(listName) != nil }
+
     static func load() -> [TopShelfItem] {
         guard let file = newest(listName), let data = try? Data(contentsOf: file) else { return [] }
         return (try? JSONDecoder().decode([TopShelfItem].self, from: data)) ?? []

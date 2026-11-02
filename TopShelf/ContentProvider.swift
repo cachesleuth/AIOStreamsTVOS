@@ -8,6 +8,8 @@ import TVServices
  */
 final class ContentProvider: TVTopShelfContentProvider {
     override func loadTopShelfContent(completionHandler: @escaping (TVTopShelfContent?) -> Void) {
+        // The app writes a list, even an empty one, whenever the page sends it.
+        guard TopShelfStore.hasList else { return completionHandler(notShared()) }
         let items = TopShelfStore.load()
         let sections = [
             section("Continue Watching", items.filter(\.resumes)),
@@ -15,6 +17,27 @@ final class ContentProvider: TVTopShelfContentProvider {
         ].compactMap { $0 }
         TopShelfStore.noteAsked(shown: sections.reduce(0) { $0 + $1.items.count })
         completionHandler(sections.isEmpty ? nil : TVTopShelfSectionedContent(sections: sections))
+    }
+
+    /**
+     * No list where this extension can read it: the signing gave it no App
+     * Group the app has, or the app hasn't been opened since it was installed.
+     * Shows this extension's groups, to compare with the app menu's.
+     */
+    private func notShared() -> TVTopShelfContent {
+        let groups = TopShelfStore.entitled
+        let names = groups.isEmpty ? ["No App Groups in this extension's signature"] : groups
+        let open = URL(string: "aiostreams://open")
+        let items = names.enumerated().map { index, name -> TVTopShelfSectionedItem in
+            let item = TVTopShelfSectionedItem(identifier: "group-\(index)")
+            item.title = name
+            item.imageShape = .hdtv
+            if let open { item.displayAction = TVTopShelfAction(url: open) }
+            return item
+        }
+        let section = TVTopShelfItemCollection(items: items)
+        section.title = "No list from the app: open AIOStreams, or compare these groups with its menu"
+        return TVTopShelfSectionedContent(sections: [section])
     }
 
     private func section(_ title: String, _ items: [TopShelfItem]) -> TVTopShelfItemCollection<TVTopShelfSectionedItem>? {
