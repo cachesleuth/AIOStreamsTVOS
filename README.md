@@ -99,8 +99,10 @@ from the next video.
 ### Subtitles
 
 The engine decodes them, text, ASS and PGS, DVB and DVD pictures, and the app draws them over the
-video (`App/Player/SubtitleOverlay.swift`). Text and pictures take the page's style: colour,
-outline, shadow, box, size and position, in the units the page sends for mpv.
+video (`App/Player/SubtitleOverlay.swift`). Text takes the page's style: colour, outline,
+shadow, box, size and position, in the units the page sends for mpv. Pictures (PGS, DVB, DVD)
+keep the disc's look and place, drawn 20% under the disc's size at Normal and scaled by the
+page's subtitle size, which the player's controls step too.
 
 ASS and SSA go to libass (`App/Player/AssRenderer.swift`, from
 [swift-libass](https://github.com/mihai8804858/swift-libass)), as mpv drew them: the file's

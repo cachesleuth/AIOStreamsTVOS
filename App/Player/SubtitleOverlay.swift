@@ -277,13 +277,34 @@ final class SubtitleOverlay: UIView {
         }
         let view = UIImageView(image: UIImage(cgImage: image.cgImage))
         view.contentMode = .scaleToFill
-        view.frame = CGRect(
+        let placed = CGRect(
             x: canvas.minX + image.position.minX * canvas.width,
             y: canvas.minY + image.position.minY * canvas.height,
             width: image.position.width * canvas.width,
             height: image.position.height * canvas.height
         )
+        view.frame = Self.scaled(placed, by: Self.pictureScale * CGFloat(look?.scale ?? 1), in: canvas)
         addSubview(view)
+    }
+
+    /// Pictures at the page's Normal size: 20% under the disc's own, which reads large on a TV.
+    /// The page's subtitle size (Small to Huge, also stepped from the player's controls) scales from there.
+    private static let pictureScale: CGFloat = 0.8
+
+    /**
+     * A picture resized about the edge it belongs to, so it stays where the disc put it: one in the
+     * canvas's lower half keeps its bottom edge, one in the upper half its top, and each keeps its
+     * centre across. Kept inside the canvas when it grows.
+     */
+    static func scaled(_ rect: CGRect, by factor: CGFloat, in canvas: CGRect) -> CGRect {
+        guard factor > 0, factor != 1 else { return rect }
+        let width = rect.width * factor
+        let height = rect.height * factor
+        var x = rect.midX - width / 2
+        var y = rect.midY >= canvas.midY ? rect.maxY - height : rect.minY
+        if width <= canvas.width { x = min(max(x, canvas.minX), canvas.maxX - width) }
+        if height <= canvas.height { y = min(max(y, canvas.minY), canvas.maxY - height) }
+        return CGRect(x: x, y: y, width: width, height: height)
     }
 
     // MARK: Text
