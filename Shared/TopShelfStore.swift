@@ -64,57 +64,78 @@ enum TopShelfStore {
     /// The App Groups this process was signed with.
     static let entitled = entitledGroups()
 
-    /// A TopShelf folder in each group's container that tvOS gave this process.
-    static let folders: [URL] = {
-        let groups = entitled.isEmpty ? [declaredGroup] : entitled
-        return groups.compactMap {
-            FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0)?
-                .appendingPathComponent("TopShelf", isDirectory: true)
-        }
-    }()
+    private static var groups: [String] { entitled.isEmpty ? [declaredGroup] : entitled }
+
+    /**
+     * A TopShelf folder in each group's container that tvOS gave this process.
+     * tvOS keeps nothing on disk but caches, in a shared container as in the
+     * app's own, and refuses writes anywhere else in it; so `Library/Caches`.
+     */
+    static let folders: [URL] = groups.compactMap {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0)?
+            .appendingPathComponent("Library/Caches/TopShelf", isDirectory: true)
+    }
+
+    /// Each group's shared settings, which tvOS keeps, unlike caches.
+    private static let suites: [UserDefaults] = groups.compactMap { UserDefaults(suiteName: $0) }
 
     private static let listName = "items.json"
     private static let askedName = "asked.txt"
+    private static func settingsKey(_ name: String) -> String { "aiostreams.topShelf.\(name)" }
 
-    /// The most recently written copy of a file, across the groups.
-    private static func newest(_ name: String) -> URL? {
-        folders
-            .map { $0.appendingPathComponent(name) }
-            .compactMap { url -> (URL, Date)? in
-                guard let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
-                    .contentModificationDate else { return nil }
-                return (url, date)
-            }
-            .max { $0.1 < $1.1 }?.0
+    /// The most recently written copy, from any group's settings or folder.
+    private static func newest(_ name: String) -> Data? {
+        let key = settingsKey(name)
+        let fromSettings = suites.compactMap { suite -> (Data, Date)? in
+            guard let saved = suite.dictionary(forKey: key),
+                  let data = saved["data"] as? Data, let date = saved["date"] as? Date else { return nil }
+            return (data, date)
+        }
+        let fromFiles = folders.compactMap { folder -> (Data, Date)? in
+            let url = folder.appendingPathComponent(name)
+            guard let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
+                  let data = try? Data(contentsOf: url) else { return nil }
+            return (data, date)
+        }
+        return (fromSettings + fromFiles).max { $0.1 < $1.1 }?.0
     }
 
-    /// Why the last write into a group failed, for the app menu.
+    /// Why the last write into a group's folder failed, for the app menu.
     private(set) static var lastError: String?
+    /// Where the last write went: how many groups' settings and folders took it.
+    private(set) static var lastWrite = (settings: 0, files: 0)
 
-    /// Into every group; true if at least one took it.
+    /// Into every group's settings and folder; true if any took it.
     private static func write(_ data: Data, as name: String) -> Bool {
-        var wrote = false
+        let now = Date()
+        var settings = 0
+        for suite in suites {
+            suite.set(["data": data, "date": now], forKey: settingsKey(name))
+            if suite.synchronize() { settings += 1 }
+        }
+        var files = 0
         for folder in folders {
             do {
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                 try data.write(to: folder.appendingPathComponent(name), options: .atomic)
-                wrote = true
+                files += 1
             } catch {
-                let reason = (error as NSError).underlyingErrors.first.map { "\($0.localizedDescription)" }
+                let reason = (error as NSError).underlyingErrors.first.map { $0.localizedDescription }
                     ?? error.localizedDescription
                 lastError = "\((error as NSError).code): \(reason)"
                 NSLog("[top-shelf] writing %@ to %@: %@", name, folder.path, String(describing: error))
             }
         }
-        if wrote { lastError = nil }
-        return wrote
+        if files > 0 { lastError = nil }
+        lastWrite = (settings, files)
+        return settings + files > 0
     }
 
     /// The app has written a list, even an empty one, where this process can read it.
     static var hasList: Bool { newest(listName) != nil }
 
     static func load() -> [TopShelfItem] {
-        guard let file = newest(listName), let data = try? Data(contentsOf: file) else { return [] }
+        guard let data = newest(listName) else { return [] }
         return (try? JSONDecoder().decode([TopShelfItem].self, from: data)) ?? []
     }
 
@@ -132,7 +153,7 @@ enum TopShelfStore {
 
     /// When tvOS last asked the extension, and how many titles it showed then.
     static func lastAsked() -> (date: Date, shown: Int)? {
-        guard let file = newest(askedName), let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+        guard let data = newest(askedName), let text = String(data: data, encoding: .utf8) else { return nil }
         let parts = text.split(separator: " ")
         guard parts.count == 2, let date = ISO8601DateFormatter().date(from: String(parts[0])),
               let shown = Int(parts[1]) else { return nil }

@@ -75,7 +75,8 @@ enum TopShelf {
             "Top Shelf extension: \(bundled ? "in the app" : "missing"); \(extensionGroups)",
             "Top Shelf asked: \(asked)",
             "Top Shelf list: \(page); saved \(TopShelfStore.load().count)",
-            "App's profile: \(appProfile)" + (TopShelfStore.lastError.map { "; write error \($0)" } ?? ""),
+            "App's profile: \(appProfile); last save: \(TopShelfStore.lastWrite.settings) settings, \(TopShelfStore.lastWrite.files) folders"
+                + (TopShelfStore.lastError.map { "; folder error \($0)" } ?? ""),
         ]
     }
 
