@@ -76,6 +76,66 @@ enum BridgeScript {
     localStorage.setItem('aiostreams-web-cache-artwork', 'false');
   } catch {}
 
+  /*
+   * The page keeps every card it has shown mounted, and WebKit keeps each
+   * mounted <img>'s decoded picture, so a long scroll through a catalog
+   * fills WebKit's process until tvOS ends it ("ran out of memory"). Artwork
+   * far from the screen (`data-ui=artwork`: the poster and wide cards' pictures)
+   * has its picture swapped for a blank one, which lets WebKit drop the
+   * decoded copy, and gets it back as it nears the screen again, from
+   * WebKit's cache. A swap React made since is left alone. Measured on
+   * scroll and keys, at most four times a second, and once after they stop.
+   */
+  const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  const RELEASE_SCREENS = 3;
+  const RESTORE_SCREENS = 1.5;
+  const SWEEP_EVERY = 250;
+  const released = new WeakMap();
+  const away = (rect, size, start, end) =>
+    Math.max(0, rect[start] - size, -rect[end]) / size;
+  const sweep = () => {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    if (!w || !h) return;
+    for (const img of document.querySelectorAll('img[data-ui="artwork"]')) {
+      const src = img.getAttribute('src');
+      if (!src) continue;
+      const rect = img.getBoundingClientRect();
+      // Not laid out (a hidden page): left as it is.
+      if (!rect.width && !rect.height) continue;
+      const far = Math.max(away(rect, h, 'top', 'bottom'), away(rect, w, 'left', 'right'));
+      if (src === BLANK) {
+        const real = released.get(img);
+        if (real === undefined) continue;
+        if (far < RESTORE_SCREENS) {
+          released.delete(img);
+          img.setAttribute('src', real);
+        }
+      } else if (far > RELEASE_SCREENS && !src.startsWith('data:')) {
+        released.set(img, src);
+        img.setAttribute('src', BLANK);
+      }
+    }
+  };
+  let lastSweep = 0;
+  let sweepTimer = 0;
+  const soonSweep = () => {
+    const now = performance.now();
+    clearTimeout(sweepTimer);
+    // The trailing one catches where a scroll came to rest.
+    sweepTimer = setTimeout(() => {
+      lastSweep = performance.now();
+      sweep();
+    }, SWEEP_EVERY);
+    if (now - lastSweep < SWEEP_EVERY) return;
+    lastSweep = now;
+    requestAnimationFrame(sweep);
+  };
+  try {
+    // Capture: the page and each row scroll in their own containers.
+    document.addEventListener('scroll', soonSweep, { capture: true, passive: true });
+  } catch {}
+
   const listeners = new Set();
   const send = (message) => handler.postMessage(JSON.stringify(message));
 
@@ -243,6 +303,8 @@ enum BridgeScript {
         lastDown = now;
         if (picks) movedIn = null;
         key('keydown', name, repeat);
+        // Moves that scroll by transforms alone fire no scroll event.
+        soonSweep();
       },
       up(name) {
         if (name === 'Enter' && swallowed) {
