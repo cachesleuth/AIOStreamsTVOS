@@ -33,6 +33,24 @@ final class PlayerChannel: MPVEngineListener {
 
     var paused: Bool { state.flag("paused") != false }
 
+    /// The file's length, 0 until known or for a live stream.
+    var durationMs: Double { state.number("durationMs") ?? 0 }
+
+    /// The page's Picture-in-picture setting, from the item playing.
+    private(set) var pictureInPictureAllowed = false
+
+    /// The page closed the player, so a picture-in-picture window has nothing left to show.
+    var onStopped: () -> Void = {}
+
+    /// Paused, resumed or a new length, for the picture-in-picture window's controls.
+    var onPlaybackChanged: () -> Void = {}
+
+    /// From the picture-in-picture window, which the page can't see while it shows.
+    func skip(byMs offset: Double) {
+        let to = max(0, (state.number("positionMs") ?? 0) + offset)
+        engine.seek(durationMs > 0 ? min(durationMs, to) : to)
+    }
+
     /// A file is loaded, playing or paused.
     var playing: Bool { loaded }
 
@@ -54,6 +72,7 @@ final class PlayerChannel: MPVEngineListener {
                 onStatsPage(nil)
                 engine.stop()
                 thumbnails.close()
+                onStopped()
                 updateIdleTimer()
                 endVideo()
             case "player-set":
@@ -82,6 +101,7 @@ final class PlayerChannel: MPVEngineListener {
             case "now-playing":
                 let item = message.object("item")
                 nowPlaying.setItem(item)
+                pictureInPictureAllowed = item?.flag("pip") == true
                 if item == nil {
                     showVideo(false)
                     endVideo()
@@ -120,6 +140,7 @@ final class PlayerChannel: MPVEngineListener {
     func engineState(_ update: Message) {
         state.merge(update) { _, new in new }
         nowPlaying.update(state)
+        if update["paused"] != nil || update["durationMs"] != nil { onPlaybackChanged() }
         updateIdleTimer()
         var rest = update
         let position = rest.removeValue(forKey: "positionMs")

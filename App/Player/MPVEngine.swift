@@ -156,6 +156,15 @@ final class MPVEngine {
         }
     }
 
+    /// A new VideoToolbox session, for when tvOS ended the one playing (as it may in the background).
+    func restartDecoder() {
+        queue.async { [self] in
+            let current = hwdec ?? "videotoolbox"
+            set("hwdec", "no")
+            set("hwdec", current)
+        }
+    }
+
     func seek(_ positionMs: Double) {
         queue.async { [self] in run(["seek", Self.seconds(positionMs), "absolute"]) }
     }

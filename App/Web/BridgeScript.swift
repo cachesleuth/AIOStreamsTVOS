@@ -137,7 +137,8 @@ enum BridgeScript {
     tv: true,
     voice: false,
     gamepads: false,
-    pip: false,
+    // Shows the page's Picture-in-picture setting; the app menu starts the window.
+    pip: true,
     device: __DEVICE__,
     deviceId: __DEVICE_ID__,
     send,

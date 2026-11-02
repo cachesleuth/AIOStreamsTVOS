@@ -19,6 +19,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
     private let status = UILabel()
     private var engine: MPVEngine?
     private var player: PlayerChannel?
+    private var pip: PictureInPicture?
     private let input = RemoteInput()
     private let storage = WebStorage()
     /// The page has said hello, so it takes Back.
@@ -179,6 +180,15 @@ final class MainViewController: UIViewController, RemoteReceiver {
                 if let format { DisplayMode.apply(format, in: window) } else { DisplayMode.reset(in: window) }
             }
             self.player = player
+            let pip = PictureInPicture(
+                layer: videoView.displayLayer, player: player, engine: engine,
+                send: { [weak self] in self?.sendToPage($0) }
+            )
+            pip.failed = { [weak self] in self?.flashStatus($0) }
+            pip.ended = { [weak self] in self?.web?.focusPage() }
+            player.onPlaybackChanged = { [weak pip] in pip?.playbackChanged() }
+            player.onStopped = { [weak pip] in pip?.stop() }
+            self.pip = pip
         } catch {
             NSLog("[app] mpv did not start: %@", String(describing: error))
         }
@@ -284,11 +294,17 @@ final class MainViewController: UIViewController, RemoteReceiver {
         lines += MemoryLog.report
         lines.append("")
         lines += TopShelf.report
-        let menu = AppMenu(title: "AIOStreams", text: lines.joined(separator: "\n"), actions: [
-            AppMenu.Action(title: "Reload", destructive: false) { [weak self] in self?.loadPage() },
-            AppMenu.Action(title: "Reset the app's data", destructive: true) { [weak self] in self?.confirmReset() },
-            AppMenu.Action(title: "Close", destructive: false) {},
-        ])
+        var actions: [AppMenu.Action] = []
+        // While a video plays and the page's Picture-in-picture setting is on.
+        if pip?.offered == true {
+            actions.append(AppMenu.Action(title: "Picture in Picture", destructive: false) { [weak self] in
+                self?.pip?.start()
+            })
+        }
+        actions.append(AppMenu.Action(title: "Reload", destructive: false) { [weak self] in self?.loadPage() })
+        actions.append(AppMenu.Action(title: "Reset the app's data", destructive: true) { [weak self] in self?.confirmReset() })
+        actions.append(AppMenu.Action(title: "Close", destructive: false) {})
+        let menu = AppMenu(title: "AIOStreams", text: lines.joined(separator: "\n"), actions: actions)
         // However it closed: an action, Close or Menu.
         menu.closed = { [weak self] in self?.web?.focusPage() }
         present(menu, animated: true)
@@ -472,10 +488,13 @@ final class MainViewController: UIViewController, RemoteReceiver {
     func appWillResignActive() {
         storage.save()
         input.stopRepeating()
-        player?.change(Change(paused: true))
+        pip?.appWillResignActive()
+        // The picture-in-picture window keeps playing over the Home screen.
+        if pip?.active != true { player?.change(Change(paused: true)) }
     }
 
     func appDidBecomeActive() {
+        pip?.appDidBecomeActive()
         web?.focusPage()
     }
 }
