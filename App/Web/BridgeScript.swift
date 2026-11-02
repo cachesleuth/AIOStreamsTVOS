@@ -278,9 +278,43 @@ enum BridgeScript {
   let pipOffered = false;
   let pipButton = null;
   let pipQueued = false;
+  /*
+   * The label over the button while it has focus, as the page's own buttons
+   * show theirs: the page's tooltip classes, above the button and centred on
+   * it, kept on screen. The page hides its controls by taking focus away,
+   * which takes the label with it.
+   */
+  let pipLabel = null;
+  const PIP_LABEL_GAP = 4;
+  const showPipLabel = () => {
+    if (!pipButton?.isConnected) return;
+    if (!pipLabel) {
+      pipLabel = document.createElement('div');
+      pipLabel.setAttribute('role', 'tooltip');
+      pipLabel.dataset.side = 'top';
+      pipLabel.className =
+        'UI-Tooltip__root z-50 overflow-hidden rounded-xl px-3 py-1.5 text-sm shadow-md ' +
+        'animate-in fade-in-50 bg-gray-900 border text-white data-[side=top]:slide-in-from-bottom-1';
+      pipLabel.style.position = 'fixed';
+      pipLabel.style.pointerEvents = 'none';
+      pipLabel.style.whiteSpace = 'nowrap';
+      pipLabel.textContent = 'Picture in picture';
+    }
+    document.body.appendChild(pipLabel);
+    const button = pipButton.getBoundingClientRect();
+    const label = pipLabel.getBoundingClientRect();
+    const left = Math.min(
+      Math.max(8, button.left + button.width / 2 - label.width / 2),
+      window.innerWidth - label.width - 8
+    );
+    pipLabel.style.left = `${left}px`;
+    pipLabel.style.top = `${button.top - label.height - PIP_LABEL_GAP}px`;
+  };
+  const hidePipLabel = () => pipLabel?.remove();
   const placePip = () => {
     pipQueued = false;
     if (!pipOffered) {
+      hidePipLabel();
       pipButton?.remove();
       return;
     }
@@ -297,7 +331,12 @@ enum BridgeScript {
       pipButton.setAttribute('aria-label', 'Picture in picture');
       pipButton.title = 'Picture in picture';
       pipButton.innerHTML = PIP_ICON;
-      pipButton.addEventListener('click', () => send({ type: 'tvos-pip' }));
+      pipButton.addEventListener('click', () => {
+        hidePipLabel();
+        send({ type: 'tvos-pip' });
+      });
+      pipButton.addEventListener('focus', showPipLabel);
+      pipButton.addEventListener('blur', hidePipLabel);
     }
     pipButton.className = like.className;
     row.appendChild(pipButton);
@@ -309,6 +348,7 @@ enum BridgeScript {
   };
   try {
     new MutationObserver(() => {
+      if (pipLabel?.isConnected && !pipButton?.isConnected) hidePipLabel();
       if (pipOffered && !pipButton?.isConnected) queuePip();
     }).observe(document.documentElement, { childList: true, subtree: true });
   } catch {}
