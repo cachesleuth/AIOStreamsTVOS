@@ -145,6 +145,7 @@ enum AppAnswers {
             "Colours: \(values["video-params/primaries"] ?? "?"), \(values["video-params/gamma"] ?? "?")",
             "Match Content: \(matching)",
             "Display request: \(DisplayMode.lastReport)",
+            HDR10Plus.report,
         ]
     }
 
@@ -168,7 +169,7 @@ enum AppAnswers {
             "SIL Open Font License, version 1.1: https://openfontlicense.org",
         ],
         "libraries": [
-            ["name": "MPVKit (Streamyfin build)", "licence": "GPL-3.0", "url": "https://github.com/streamyfin/MPVKit", "texts": [0]],
+            ["name": "MPVKit (Streamyfin build, with HDR10+)", "licence": "GPL-3.0", "url": "https://github.com/mickey2266/MPVKit/tree/aiostreams-hdr10plus", "texts": [0]],
             ["name": "mpv", "licence": "GPL-3.0", "url": "https://mpv.io", "texts": [0]],
             ["name": "FFmpeg", "licence": "GPL-3.0", "url": "https://ffmpeg.org", "texts": [0]],
             ["name": "Noto Sans", "licence": "OFL-1.1", "url": "https://notofonts.github.io", "texts": [1]],

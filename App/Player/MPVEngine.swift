@@ -18,7 +18,7 @@ protocol MPVEngineListener: AnyObject {
 /**
  * libmpv with Streamyfin's vo_avfoundation output: VideoToolbox decodes, and
  * the frames go to an AVSampleBufferDisplayLayer with their HDR metadata, so
- * HDR10 and HLG reach the TV as HDR. Set up as the working aiostreams-tvos
+ * HDR10 and HLG reach the TV as HDR, and HDR10+ with its dynamic metadata. Set up as the working aiostreams-tvos
  * project does. Otherwise follows AIOStreams' Android MpvEngine: the same
  * options, the same properties observed and the same reports.
  * Every mpv call runs on one serial queue, never the main thread: mpv's video
@@ -78,7 +78,8 @@ final class MPVEngine {
         }
         if let fontsDir { mpv_set_option_string(mpv, "sub-fonts-dir", fontsDir.path) }
         Self.applyFixed(mpv, option: true)
-        mpv_request_log_messages(mpv, "warn")
+        // Info, for vo_avfoundation's note that it passes HDR10+ metadata; only warnings are logged.
+        mpv_request_log_messages(mpv, "info")
         guard mpv_initialize(mpv) >= 0 else {
             mpv_terminate_destroy(mpv)
             self.mpv = nil
@@ -394,7 +395,11 @@ final class MPVEngine {
             if level <= MPV_LOG_LEVEL_ERROR.rawValue, prefix == "ffmpeg", cause == nil {
                 cause = text.replacingOccurrences(of: "^\\w+: ", with: "", options: .regularExpression)
             }
-            NSLog("[mpv/%@] %@", prefix, text)
+            // Said once per process by the HDR10+ build, on the first frame that carries it.
+            if text.contains("HDR10+ dynamic metadata") { HDR10Plus.seenSinceLaunch = true }
+            if level <= MPV_LOG_LEVEL_WARN.rawValue || text.contains("HDR10+") {
+                NSLog("[mpv/%@] %@", prefix, text)
+            }
         case MPV_EVENT_SHUTDOWN:
             if let mpv {
                 mpv_set_wakeup_callback(mpv, nil, nil)

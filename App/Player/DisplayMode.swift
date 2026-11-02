@@ -3,6 +3,23 @@ import AVKit
 import CoreMedia
 import UIKit
 
+/**
+ * HDR10+ (SMPTE ST 2094-40) dynamic metadata. The HDR10+ MPVKit build's
+ * vo_avfoundation attaches each frame's to its sample buffer, and tvOS passes
+ * it to the TV with the HDR10 signal. The TV mode stays HDR10: tvOS has no
+ * separate HDR10+ mode to ask for. vo_avfoundation says so in mpv's log once
+ * per launch, on the first frame that carries it.
+ */
+enum HDR10Plus {
+    static var seenSinceLaunch = false
+
+    static var report: String {
+        seenSinceLaunch
+            ? "HDR10+: metadata passed to the TV since launch"
+            : "HDR10+: none passed since launch"
+    }
+}
+
 /// What the video is, as mpv reports it in `video-params`.
 struct VideoFormat: Equatable {
     /// mpv's names: `bt.2020`, `bt.709`, …
