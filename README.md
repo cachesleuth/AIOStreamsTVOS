@@ -53,6 +53,9 @@ page the same way:
   That covers profile 8 (most streaming releases) and profile 7 (UHD Blu-ray remuxes). Real Dolby
   Vision output on Apple TV only comes from Apple's own player, which can't play what mpv plays.
 - **Profile 5** has no HDR10 base layer, so its colours come out wrong (purple and green).
+- **HDR10+** plays as HDR10. tvOS doesn't send HDR10+ for frames mpv decodes itself, even with the
+  metadata attached to them and the TV in HDR10+ mode, so the app uses Streamyfin's MPVKit without
+  the HDR10+ patch.
 - Subtitles are drawn by libass with the bundled Noto Sans (SIL Open Font License), as libass can't
   open tvOS's own fonts.
 
@@ -111,9 +114,9 @@ again.
   extension with it, so a sideloading tool can carry it over when it re-signs. Some tools swap it
   for generic groups (`group.<hash>.1` to `.5`) in no set order, so the app writes the list to every
   group it's signed with, and the extension reads the newest copy from any of them.
-- The app menu (hold Play/Pause) and the diagnostics the page asks the app for show the groups, the extension's bundle ID and profile, the page's list
-  and when tvOS last asked the extension. If tvOS never asks, restart the Apple TV once after
-  installing.
+- The app menu (hold Play/Pause) and the diagnostics the page asks the app for show the groups,
+  the extension's bundle ID and profile, the page's list and when tvOS last asked the extension. If
+  tvOS never asks, restart the Apple TV once after installing.
 - The extension needs a profile of its own, for an App ID under the app's with the same App Group.
   A certificate with one explicit profile signs both with the app's App ID, and tvOS doesn't run
   the extension then.
@@ -127,8 +130,8 @@ Play/Pause) shows the app's memory and when the page last reloaded.
 
 Scrolling fast through the home and discover pages ran it out of memory too, most likely because
 the page slides the whole page in layers for each key press, and a held key's repeats kept
-several slides running. The bridge script lets a held key's repeats, and presses as quick as them, jump to each
-row instead; a single press still slides.
+several slides running. The bridge script lets a held key's repeats, and presses as quick as them,
+jump to each row instead; a single press still slides.
 
 ### Posing as the Android TV app
 
@@ -138,8 +141,12 @@ app on a TV (`platform: 'android'`, `tv: true`). That gets the TV layout, remote
 Back behaviour and the bundled-player path. It also means:
 
 - Jellyfin lists the device as **AIOStreams Android TV**.
-- Settings shows an **Android app** section. Its mpv.conf editor works; updates show as off.
+- Settings shows an **Android app** section. Its mpv.conf editor works; updates show as off, and
+  **Play in the background** does nothing (leaving the app pauses the video).
 - Android-only playback settings (frame rate matching, tunnelling) show and do nothing.
+- The **player engine** setting does nothing: mpv always plays, and the app answers the page that it
+  plays with mpv, so the page shows mpv's options and statistics. The **Play with ExoPlayer** retry
+  the page offers after a failed load, when the setting isn't Automatic, does nothing either.
 - mpv's statistics overlay is a Lua script, which tvOS's libmpv lacks, so the app draws its own
   from mpv's properties: the same pages (Playback, Frame timings, Cache, Tracks), as plain text.
 
@@ -150,6 +157,7 @@ Back behaviour and the bundled-player path. It also means:
 | Clickpad edges / swipe              | Arrow keys (held edges repeat)                    |
 | Click                               | Enter (held, the page's hold actions)             |
 | Click on a text field               | tvOS's search keyboard over the page, typing straight into the field (dictation on the mic button); Menu or moving down closes it. Passwords and PINs get the keyboard in an alert |
+| Click in a searchable list          | Such as Discover's catalog picker: after moving through it with Up or Down, picks the highlighted entry; straight away, opens the keyboard to search |
 | Back / Menu                         | The page's Back; twice on Home leaves the app     |
 | Play/Pause                          | Play/Pause                                        |
 | **Hold Play/Pause (1 s)**           | App menu: the app's diagnostics (move left onto them, then swipe or click up and down to scroll), reload, or reset the app's data |
@@ -194,12 +202,12 @@ Safari's Develop menu on a Mac can inspect the page.
 | -------------- | ---------------------------------------------------------------------- |
 | `App/Web`      | The WKWebView wrapper and scheme handler, the bridge script, storage   |
 | `App/Bridge`   | JSON helpers                                                           |
-| `App/Player`   | libmpv, the player messages, Now Playing and remote commands           |
-| `App/Input`    | The window that takes the remote, and the keys it becomes              |
-| `App/Support`  | Identity, folders, mpv.conf, the app's own answers, the Top Shelf list |
+| `App/Player`   | libmpv, the player messages, seek-bar thumbnails, TV modes, Now Playing and remote commands, YouTube trailers, picture in picture (off) |
+| `App/Input`    | The window that takes the remote, the keys it becomes, the keyboard    |
+| `App/Support`  | Identity, folders, mpv.conf, the app menu, the app's own answers, the Top Shelf list |
 | `TopShelf`     | The Top Shelf extension: Continue Watching and Next Up                 |
 | `Shared`       | What the app and the extension both read: the saved list               |
-| `scripts`      | Building the web app into `WebBuild` (git-ignored)                     |
+| `scripts`      | Building the web app into `WebBuild` and fetching MPVKit into `Vendor` (both git-ignored) |
 
 ## Licences
 
