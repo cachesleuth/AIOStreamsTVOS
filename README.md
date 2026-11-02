@@ -87,8 +87,12 @@ again.
   extension with it, so a sideloading tool can carry it over when it re-signs. Some tools swap it
   for generic groups (`group.<hash>.1` to `.5`) in no set order, so the app writes the list to every
   group it's signed with, and the extension reads the newest copy from any of them.
-- The app menu (hold Play/Pause) shows the groups, the extension, the page's list and when tvOS last
-  asked the extension. If tvOS never asks, restart the Apple TV once after installing.
+- The diagnostics the page asks the app for show the groups, the extension's bundle ID and profile, the page's list
+  and when tvOS last asked the extension. If tvOS never asks, restart the Apple TV once after
+  installing.
+- The extension needs a profile of its own, for an App ID under the app's with the same App Group.
+  A certificate with one explicit profile signs both with the app's App ID, and tvOS doesn't run
+  the extension then.
 
 ### Artwork size
 
