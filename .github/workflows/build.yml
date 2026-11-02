@@ -46,11 +46,11 @@ jobs:
           brew install xcodegen
           xcodegen generate
 
-      # AetherEngine's packages (FFmpegBuild's frameworks are the bulk), kept between runs.
+      # AetherEngine's and libass's packages (FFmpegBuild's frameworks are the bulk), kept between runs.
       - uses: actions/cache@v4
         with:
           path: build/SourcePackages
-          key: spm-${{ hashFiles('Packages/AetherHost/Package.swift') }}
+          key: spm-${{ hashFiles('Packages/AetherHost/Package.swift', 'project.yml') }}
 
       - name: Build for Apple TV
         run: |

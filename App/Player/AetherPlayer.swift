@@ -154,6 +154,8 @@ final class AetherPlayer {
         options.audioShaping = shaping
         options.audioDelaySeconds = settings.audioDelayMs / 1000
         if !settings.hardwareDecoding { options.preferredDecodePath = .software }
+        // ASS and SSA cues come as their event lines, for libass (`SubtitleOverlay`); other formats are unaffected.
+        options.preserveASSMarkup = true
         return options
     }
 
@@ -402,6 +404,16 @@ final class AetherPlayer {
             .store(in: &watching)
         engine.$subtitleCues
             .sink { [weak self] cues in self?.subtitles.setCues(cues) }
+            .store(in: &watching)
+        // Whether the track's cues are ASS event lines, and the header libass styles them with: an
+        // embedded track's from the container, a file's from its own decode.
+        Publishers.CombineLatest3(engine.$activeSubtitleTrackIndex, engine.$sidecarASSHeader, engine.$subtitleTracks)
+            .sink { [weak self] index, sidecarHeader, tracks in
+                let track = index.flatMap { id in tracks.first { $0.id == id } }
+                let isASS = track.map { ["ass", "ssa"].contains($0.codec.lowercased()) } ?? false
+                let header = track.flatMap { $0.isExternal ? sidecarHeader : $0.assHeader }
+                self?.subtitles.setASSTrack(id: index, raw: isASS || header != nil, header: header)
+            }
             .store(in: &watching)
         Publishers.CombineLatest(engine.$audioTracks, engine.$subtitleTracks)
             .dropFirst()

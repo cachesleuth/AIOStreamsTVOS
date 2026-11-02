@@ -10,6 +10,10 @@ packages:
   # AetherEngine, pinned (see its Package.swift).
   AetherHost:
     path: Packages/AetherHost
+  # libass 0.17.3 with FreeType, HarfBuzz, FriBidi and CoreText, prebuilt: ASS/SSA subtitles as mpv drew them.
+  SwiftLibass:
+    url: https://github.com/mihai8804858/swift-libass
+    exactVersion: 1.4.0
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -58,6 +62,7 @@ targets:
       - sdk: TVServices.framework
       # The player. Its FFmpeg comes as dynamic frameworks, which Xcode embeds.
       - package: AetherHost
+      - package: SwiftLibass
       - sdk: MediaPlayer.framework
       - sdk: AVFoundation.framework
       - sdk: AVKit.framework

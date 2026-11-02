@@ -3,8 +3,12 @@ import UIKit
 
 /**
  * Subtitles over the video, in the page's style. AetherEngine decodes them
- * (text, ASS as styled runs, and PGS, DVB and DVD pictures) and leaves the
- * drawing to the app, where mpv's libass drew them before.
+ * (text as styled runs, and PGS, DVB and DVD pictures) and leaves the drawing
+ * to the app.
+ *
+ * ASS and SSA tracks go to libass (`AssRenderer`), as mpv drew them, with the
+ * file's own styles, unless the page forces its style on them: then they're
+ * drawn as plain text in the page's style, like the rest.
  *
  * Cues carry the source's own timestamps, so they're matched against the
  * engine's source clock, less the page's subtitle delay. The page's sizes are
@@ -27,10 +31,22 @@ final class SubtitleOverlay: UIView {
     /// What's drawn now, so a tick that changes nothing draws nothing.
     private var drawn: (ids: [Int], rect: CGRect, bounds: CGRect)?
 
+    /// The selected track, so a switch between two with the same header still starts over.
+    private var assTrackID: Int?
+    /// The track's cues are raw ASS event lines (`ReadOrder,Layer,Style,...,Text`).
+    private var rawASS = false
+    /// The ASS track's header, which libass needs to draw it.
+    private var assHeader: String?
+    private lazy var ass = AssRenderer()
+    private var assLoaded = false
+    private let assView = UIImageView()
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
         backgroundColor = .clear
+        assView.isHidden = true
+        addSubview(assView)
     }
 
     @available(*, unavailable)
@@ -38,6 +54,7 @@ final class SubtitleOverlay: UIView {
 
     func setCues(_ cues: [SubtitleCue]) {
         self.cues = cues
+        if assLoaded { ass.add(Self.events(cues)) }
         refresh()
     }
 
@@ -49,18 +66,65 @@ final class SubtitleOverlay: UIView {
     func setStyle(_ style: Style) {
         look = style.subtitles
         cropped = style.fit == .crop
+        updateASS()
+        redraw()
+    }
+
+    /**
+     * The selected track, as far as drawing goes: `raw` when the engine hands
+     * its events over as ASS event lines, and the header that styles them.
+     */
+    func setASSTrack(id: Int?, raw: Bool, header: String?) {
+        guard id != assTrackID || raw != rawASS || header != assHeader else { return }
+        assTrackID = id
+        rawASS = raw
+        assHeader = header
+        // Another track's events and styles: start over.
+        if assLoaded {
+            assLoaded = false
+            ass.unload()
+        }
+        updateASS()
         redraw()
     }
 
     func reset() {
         cues = []
         time = 0
+        setASSTrack(id: nil, raw: false, header: nil)
         redraw()
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         refresh()
+    }
+
+    /// libass draws when the track is ASS with its header, and the page leaves the file its styles.
+    private var drawsWithLibass: Bool {
+        rawASS && assHeader != nil && look?.forceStyle != true
+    }
+
+    /// Loads or drops the libass track to match what should draw it.
+    private func updateASS() {
+        if drawsWithLibass, let assHeader {
+            guard !assLoaded else { return }
+            assLoaded = true
+            ass.load(header: assHeader)
+            ass.add(Self.events(cues))
+        } else if assLoaded {
+            assLoaded = false
+            ass.unload()
+        }
+        assView.image = nil
+        assView.isHidden = true
+        clearText()
+        drawn = nil
+    }
+
+    /// Removes the cues drawn as views, leaving libass's picture.
+    private func clearText() {
+        subviews.forEach { if $0 !== assView { $0.removeFromSuperview() } }
     }
 
     /// Draws again even if the same cues show, as after a style change.
@@ -70,6 +134,10 @@ final class SubtitleOverlay: UIView {
     }
 
     private func refresh() {
+        if assLoaded {
+            renderASS()
+            return
+        }
         let at = time - delay
         let active = cues
             .filter { $0.startTime <= at && at < $0.endTime }
@@ -78,7 +146,7 @@ final class SubtitleOverlay: UIView {
         let ids = active.map(\.id)
         if let drawn, drawn.ids == ids, drawn.rect == rect, drawn.bounds == bounds { return }
         drawn = (ids, rect, bounds)
-        subviews.forEach { $0.removeFromSuperview() }
+        clearText()
         guard !active.isEmpty, rect.width > 0, rect.height > 0 else { return }
 
         var stacks: [Int: CGFloat] = [:]
@@ -86,12 +154,110 @@ final class SubtitleOverlay: UIView {
             switch cue.body {
             case .image(let image):
                 place(image, in: rect)
-            case .text(let text):
+            case .text(let raw):
+                // An ASS track drawn in the page's style: its event lines, as plain text.
+                let text = rawASS ? Self.plainText(fromASSEvents: raw) : raw
+                guard !text.isEmpty else { continue }
                 placeText(attributed([SubtitleRun(text: text)]), cue.placement, in: rect, stacks: &stacks)
             case .richText(let runs):
                 placeText(attributed(runs.map { SubtitleRun($0) }), cue.placement, in: rect, stacks: &stacks)
             }
         }
+    }
+
+    // MARK: libass
+
+    /**
+     * libass draws over the whole view, with the picture's edges as its
+     * margins, so a script's positions land on the picture and, cropped, its
+     * dialogue stays on the screen. Pixels at the screen's scale, up to 2.
+     */
+    private func renderASS() {
+        let picture = videoRect()
+        guard picture.width > 0, picture.height > 0, bounds.width > 0, bounds.height > 0 else {
+            assView.isHidden = true
+            return
+        }
+        let scale = min(2, max(1, traitCollection.displayScale))
+        func pixels(_ value: CGFloat) -> Int32 { Int32((value * scale).rounded()) }
+        let layout = AssRenderer.Layout(
+            frameWidth: pixels(bounds.width),
+            frameHeight: pixels(bounds.height),
+            top: pixels(picture.minY - bounds.minY),
+            bottom: pixels(bounds.maxY - picture.maxY),
+            left: pixels(picture.minX - bounds.minX),
+            right: pixels(bounds.maxX - picture.maxX),
+            useMargins: cropped,
+            // 20% under the file's sizes, as the overlay's own text is under mpv's.
+            fontScale: (look?.scale ?? 1) * 0.8
+        )
+        let milliseconds = Int64(((time - delay) * 1000).rounded())
+        ass.render(at: milliseconds, layout: layout) { [weak self] output in
+            self?.show(output, scale: scale)
+        }
+    }
+
+    private func show(_ output: AssRenderer.Output, scale: CGFloat) {
+        guard assLoaded else { return }
+        switch output {
+        case .unchanged:
+            break
+        case .empty:
+            assView.image = nil
+            assView.isHidden = true
+        case .frame(let image, let rect):
+            assView.image = UIImage(cgImage: image, scale: scale, orientation: .up)
+            assView.frame = CGRect(
+                x: bounds.minX + rect.minX / scale,
+                y: bounds.minY + rect.minY / scale,
+                width: rect.width / scale,
+                height: rect.height / scale
+            )
+            assView.isHidden = false
+        }
+    }
+
+    /// The text cues' event lines, for libass.
+    private static func events(_ cues: [SubtitleCue]) -> [SubtitleCueEvent] {
+        cues.compactMap { cue in
+            guard case .text(let text) = cue.body else { return nil }
+            return SubtitleCueEvent(text: text, start: cue.startTime, end: cue.endTime)
+        }
+    }
+
+    /**
+     * The words of ASS event lines (`ReadOrder,Layer,Style,Name,MarginL,
+     * MarginR,MarginV,Effect,Text`), one line each: override blocks dropped,
+     * `\N` and `\n` as line breaks, `\h` as a space. Drawings (`\p1` and up)
+     * aren't words, so their lines go.
+     */
+    static func plainText(fromASSEvents raw: String) -> String {
+        raw.split(separator: "\n", omittingEmptySubsequences: true).compactMap { line -> String? in
+            let fields = line.split(separator: ",", maxSplits: 8, omittingEmptySubsequences: false)
+            guard fields.count == 9, Int(fields[0]) != nil else {
+                return line.trimmingCharacters(in: .whitespaces)
+            }
+            let body = fields[8]
+            if body.range(of: #"\\p[1-9]"#, options: .regularExpression) != nil { return nil }
+            var text = ""
+            var depth = 0
+            for character in body {
+                if character == "{" {
+                    depth += 1
+                } else if character == "}", depth > 0 {
+                    depth -= 1
+                } else if depth == 0 {
+                    text.append(character)
+                }
+            }
+            text = text
+                .replacingOccurrences(of: "\\N", with: "\n")
+                .replacingOccurrences(of: "\\n", with: "\n")
+                .replacingOccurrences(of: "\\h", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty ? nil : text
+        }
+        .joined(separator: "\n")
     }
 
     // MARK: Pictures
@@ -144,8 +310,9 @@ final class SubtitleOverlay: UIView {
         }
     }
 
-    /// mpv's sizes at sub-scale 1, in units of a 720-line picture.
-    private static let fontUnits: CGFloat = 55
+    /// Sizes at sub-scale 1, in units of a 720-line picture: mpv's 55-unit font made 20% smaller,
+    /// which reads better on a TV; the margin is mpv's.
+    private static let fontUnits: CGFloat = 44
     private static let marginUnits: CGFloat = 22
 
     private func units(_ rect: CGRect) -> CGFloat { rect.height / 720 }

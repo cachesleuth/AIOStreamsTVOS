@@ -86,10 +86,17 @@ menu (hold Play/Pause) and the diagnostics add the audio route and the engine's 
 ### Subtitles
 
 The engine decodes them, text, ASS and PGS, DVB and DVD pictures, and the app draws them over the
-video in the page's style (`App/Player/SubtitleOverlay.swift`): colour, outline, shadow, box, size
-and position, in the units the page sends for mpv. ASS files keep their colours, bold, italics and
-`\an` placement unless the page's style overrides them, but not their fonts or effects, which
-libass drew before.
+video (`App/Player/SubtitleOverlay.swift`). Text and pictures take the page's style: colour,
+outline, shadow, box, size and position, in the units the page sends for mpv.
+
+ASS and SSA go to libass (`App/Player/AssRenderer.swift`, from
+[swift-libass](https://github.com/mihai8804858/swift-libass)), as mpv drew them: the file's
+styles, positioning, animation, karaoke and drawings. Dialogue is drawn 20% under the file's size
+and scaled by the page's subtitle size, as the text subtitles are; signs keep theirs. Fonts
+come from tvOS through CoreText, and from a script's own `[Fonts]` section; fonts attached to an
+MKV aren't read, as the engine doesn't hand them over, so a typeset that names one gets the
+nearest tvOS font. When the page forces its style on ASS, they're drawn as plain text in that
+style instead.
 
 ### Trailers
 
