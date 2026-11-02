@@ -9,7 +9,10 @@ import TVServices
 final class ContentProvider: TVTopShelfContentProvider {
     override func loadTopShelfContent(completionHandler: @escaping (TVTopShelfContent?) -> Void) {
         // The app writes a list, even an empty one, whenever the page sends it.
-        guard TopShelfStore.hasList else { return completionHandler(notShared()) }
+        guard TopShelfStore.hasList else {
+            TopShelfStore.noteAsked(shown: 0)
+            return completionHandler(notShared())
+        }
         let items = TopShelfStore.load()
         let sections = [
             section("Continue Watching", items.filter(\.resumes)),

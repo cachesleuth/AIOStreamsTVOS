@@ -51,6 +51,7 @@ enum TopShelf {
         let containers = TopShelfStore.folders.count
         let appex = Bundle.main.builtInPlugInsURL?.appendingPathComponent("AIOStreamsTopShelf.appex")
         let bundled = appex.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
+        let ids = appex.map { identity(of: $0) } ?? "-"
         let extensionGroups: String
         if let appex, let profile = provisionedGroups(in: appex) {
             let shared = Set(profile).intersection(TopShelfStore.entitled).count
@@ -73,6 +74,7 @@ enum TopShelf {
         return [
             "Top Shelf: app has \(groups) App Groups (\(TopShelfStore.entitled.map(shortGroup).joined(separator: " "))), \(containers) containers",
             "Top Shelf extension: \(bundled ? "in the app" : "missing"); \(extensionGroups)",
+            "Top Shelf IDs: \(ids)",
             "Top Shelf asked: \(asked)",
             "Top Shelf list: \(page); saved \(TopShelfStore.load().count)",
             "App's profile: \(appProfile); last save: \(TopShelfStore.lastWrite.settings) settings, \(TopShelfStore.lastWrite.files) folders"
@@ -91,6 +93,32 @@ enum TopShelf {
      * a signed message wrapping a plist, which is read straight out of it.
      */
     private static func provisionedGroups(in bundle: URL) -> [String]? {
+        guard let plist = profile(in: bundle) else { return nil }
+        let entitlements = plist["Entitlements"] as? [String: Any]
+        return entitlements?["com.apple.security.application-groups"] as? [String] ?? []
+    }
+
+    /**
+     * The app's and the extension's bundle IDs, and the App ID the extension's
+     * profile is for. tvOS only runs the extension if its ID starts with the
+     * app's and the profile's App ID covers it (exactly, or by a `*`).
+     */
+    private static func identity(of appex: URL) -> String {
+        let app = Bundle.main.bundleIdentifier ?? "?"
+        let ext = Bundle(url: appex)?.bundleIdentifier ?? "?"
+        guard let plist = profile(in: appex) else { return "app \(app), extension \(ext), no profile" }
+        let entitlements = plist["Entitlements"] as? [String: Any]
+        let appID = entitlements?["application-identifier"] as? String ?? "?"
+        // Without the team prefix, which is what the bundle ID is matched against.
+        let pattern = appID.split(separator: ".", maxSplits: 1).last.map(String.init) ?? appID
+        let covered = pattern.hasSuffix("*") ? ext.hasPrefix(String(pattern.dropLast())) : ext == pattern
+        let platforms = (plist["Platform"] as? [String])?.joined(separator: "/") ?? "?"
+        return "app \(app), extension \(ext)\(ext.hasPrefix(app + ".") ? "" : " (not under the app's)"); "
+            + "its profile is for \(pattern) on \(platforms)\(covered ? "" : ", which doesn't cover it")"
+    }
+
+    /// A bundle's `embedded.mobileprovision`, as its plist.
+    private static func profile(in bundle: URL) -> [String: Any]? {
         guard let data = try? Data(contentsOf: bundle.appendingPathComponent("embedded.mobileprovision")),
               let start = data.range(of: Data("<?xml".utf8)),
               let end = data.range(of: Data("</plist>".utf8), in: start.lowerBound..<data.endIndex),
@@ -98,7 +126,6 @@ enum TopShelf {
                   from: data.subdata(in: start.lowerBound..<end.upperBound), format: nil
               ) as? [String: Any]
         else { return nil }
-        let entitlements = plist["Entitlements"] as? [String: Any]
-        return entitlements?["com.apple.security.application-groups"] as? [String] ?? []
+        return plist
     }
 }
