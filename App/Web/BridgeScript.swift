@@ -137,7 +137,7 @@ enum BridgeScript {
     tv: true,
     voice: false,
     gamepads: false,
-    // Shows the page's Picture-in-picture setting; the app menu starts the window.
+    // Shows the page's Picture-in-picture setting; the app's button in the player starts the window.
     pip: true,
     device: __DEVICE__,
     deviceId: __DEVICE_ID__,
@@ -247,6 +247,11 @@ enum BridgeScript {
             else form.submit();
           }, 250);
       },
+      /** Whether the player's picture-in-picture button shows. */
+      pip(offered) {
+        pipOffered = !!offered;
+        queuePip();
+      },
       /** The text typed on the app's alert keyboard, all at once. */
       type(value, submit) {
         const el = editing;
@@ -255,6 +260,58 @@ enum BridgeScript {
       },
     }),
   });
+
+  /*
+   * A picture-in-picture button in the player's bottom bar, after the page's
+   * own buttons. The page has none for the apps (Android enters it on leaving
+   * the app, which tvOS doesn't allow), so the app adds one while a video
+   * plays and the page's Picture-in-picture setting is on. It takes the look
+   * of the page's buttons, and the page's remote focus and Select reach it as
+   * they reach any button. React leaves a node it didn't make alone; when it
+   * builds the bar again, the button goes back in.
+   */
+  const PIP_ICON =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M21 9V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h4"/>' +
+    '<rect width="10" height="7" x="12" y="13" rx="2"/></svg>';
+  let pipOffered = false;
+  let pipButton = null;
+  let pipQueued = false;
+  const placePip = () => {
+    pipQueued = false;
+    if (!pipOffered) {
+      pipButton?.remove();
+      return;
+    }
+    // The bar's last row holds play, the skips and the option buttons.
+    const row = document.querySelector('[data-ui=player-bottom-bar]')?.lastElementChild;
+    const like = row?.querySelector('[data-ui=player-button]');
+    if (!row || !like || pipButton?.parentElement === row) return;
+    if (!pipButton) {
+      pipButton = document.createElement('button');
+      pipButton.type = 'button';
+      pipButton.dataset.ui = 'player-button';
+      pipButton.dataset.name = 'tvos-pip';
+      pipButton.dataset.focus = 'own';
+      pipButton.setAttribute('aria-label', 'Picture in picture');
+      pipButton.title = 'Picture in picture';
+      pipButton.innerHTML = PIP_ICON;
+      pipButton.addEventListener('click', () => send({ type: 'tvos-pip' }));
+    }
+    pipButton.className = like.className;
+    row.appendChild(pipButton);
+  };
+  const queuePip = () => {
+    if (pipQueued) return;
+    pipQueued = true;
+    requestAnimationFrame(placePip);
+  };
+  try {
+    new MutationObserver(() => {
+      if (pipOffered && !pipButton?.isConnected) queuePip();
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  } catch {}
 
   // A TV has no console; the app keeps these in its start-up log.
   window.addEventListener('error', (e) =>

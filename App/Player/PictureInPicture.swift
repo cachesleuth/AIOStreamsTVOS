@@ -9,8 +9,8 @@ import UIKit
  * hides its player while the window shows (`pip` messages), as on Android.
  *
  * Android enters it on leaving the app; tvOS only starts it from inside the
- * app, so it starts from the app menu, and the app then steps back to the
- * Home screen. Coming back to the app, or the window's full-screen button,
+ * app, so it starts from a button the bridge script adds to the page's
+ * player controls, and the app then steps back to the Home screen. Coming back to the app, or the window's full-screen button,
  * puts the video back in the app; closing the window pauses it, as on Android.
  *
  * mpv's display layer goes into the window as it is, through
@@ -50,7 +50,7 @@ final class PictureInPicture: NSObject {
 
     var active: Bool { controller?.isPictureInPictureActive == true }
 
-    /// The app menu offers it: a video plays and the page's setting allows it.
+    /// The player's button shows: a video plays and the page's setting allows it.
     var offered: Bool { controller != nil && !active && player.playing && player.pictureInPictureAllowed }
 
     func start() {

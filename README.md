@@ -83,11 +83,16 @@ without an ask, and open the file again on the next one.
 
 ### Picture in picture
 
-While a video plays, **Picture in Picture** in the app menu (hold Play/Pause) moves it into a small
-window, and the app steps back to the Home screen; the video keeps playing over the Home screen and
-other apps. This is the Android app's picture-in-picture: the page's **Settings → Android app →
-Picture-in-picture** switch allows it, and the page hides its player while the window shows.
-Android enters it on leaving the app, but tvOS only starts it from inside an app, hence the menu.
+While a video plays, the **picture-in-picture button** at the end of the player's bottom row moves
+it into a small window, and the app steps back to the Home screen; the video keeps playing over the
+Home screen and other apps. This is the Android app's picture-in-picture: the page's **Settings →
+Android app → Picture-in-picture** switch allows it, and the page hides its player while the window
+shows.
+
+Android enters it on leaving the app, but tvOS only starts it from inside an app, and the page has
+no button for it, so the bridge script adds one to the page's controls. It copies the look of the
+page's own buttons, and the page's remote navigation reaches it like any other button; when the page
+rebuilds its controls, the script puts it back.
 
 - Opening the app again, or the window's full-screen button, puts the video back in the app.
 - Closing the window pauses the video, as on Android.
@@ -143,7 +148,7 @@ Back behaviour and the bundled-player path. It also means:
 
 - Jellyfin lists the device as **AIOStreams Android TV**.
 - Settings shows an **Android app** section. Its mpv.conf editor and Picture-in-picture switch
-  work; updates show as off, and Play in the background does nothing.
+  work (the switch shows the app's picture-in-picture button in the player); updates show as off, and Play in the background does nothing.
 - Android-only playback settings (frame rate matching, tunnelling) show and do nothing.
 - mpv's statistics overlay is a Lua script, which tvOS's libmpv lacks, so the app draws its own
   from mpv's properties: the same pages (Playback, Frame timings, Cache, Tracks), as plain text.
@@ -157,7 +162,7 @@ Back behaviour and the bundled-player path. It also means:
 | Click on a text field               | tvOS's search keyboard over the page, typing straight into the field (dictation on the mic button); Menu or moving down closes it. Passwords and PINs get the keyboard in an alert |
 | Back / Menu                         | The page's Back; twice on Home leaves the app     |
 | Play/Pause                          | Play/Pause                                        |
-| **Hold Play/Pause (1 s)**           | App menu: picture in picture (while a video plays), the app's diagnostics (move left onto them, then swipe or click up and down to scroll), reload, or reset the app's data |
+| **Hold Play/Pause (1 s)**           | App menu: the app's diagnostics (move left onto them, then swipe or click up and down to scroll), reload, or reset the app's data |
 
 ## Saved data
 

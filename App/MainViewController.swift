@@ -147,6 +147,17 @@ final class MainViewController: UIViewController, RemoteReceiver {
         }
     }
 
+    /// What the page was last told about the player's picture-in-picture button.
+    private var pipButtonShown = false
+
+    /// Shown while a video plays and the page's Picture-in-picture setting is on.
+    private func updatePipButton() {
+        let offered = pip?.offered == true
+        guard offered != pipButtonShown else { return }
+        pipButtonShown = offered
+        callTV("pip(\(offered))")
+    }
+
     private func sendToPage(_ message: Message) {
         guard let json = JSON.string(message) else { return }
         web?.evaluateJavaScript("window.__aioReceive&&window.__aioReceive(\(json))")
@@ -185,7 +196,10 @@ final class MainViewController: UIViewController, RemoteReceiver {
                 send: { [weak self] in self?.sendToPage($0) }
             )
             pip.failed = { [weak self] in self?.flashStatus($0) }
-            pip.ended = { [weak self] in self?.web?.focusPage() }
+            pip.ended = { [weak self] in
+                self?.web?.focusPage()
+                self?.updatePipButton()
+            }
             player.onPlaybackChanged = { [weak pip] in pip?.playbackChanged() }
             player.onStopped = { [weak pip] in pip?.stop() }
             self.pip = pip
@@ -294,17 +308,11 @@ final class MainViewController: UIViewController, RemoteReceiver {
         lines += MemoryLog.report
         lines.append("")
         lines += TopShelf.report
-        var actions: [AppMenu.Action] = []
-        // While a video plays and the page's Picture-in-picture setting is on.
-        if pip?.offered == true {
-            actions.append(AppMenu.Action(title: "Picture in Picture", destructive: false) { [weak self] in
-                self?.pip?.start()
-            })
-        }
-        actions.append(AppMenu.Action(title: "Reload", destructive: false) { [weak self] in self?.loadPage() })
-        actions.append(AppMenu.Action(title: "Reset the app's data", destructive: true) { [weak self] in self?.confirmReset() })
-        actions.append(AppMenu.Action(title: "Close", destructive: false) {})
-        let menu = AppMenu(title: "AIOStreams", text: lines.joined(separator: "\n"), actions: actions)
+        let menu = AppMenu(title: "AIOStreams", text: lines.joined(separator: "\n"), actions: [
+            AppMenu.Action(title: "Reload", destructive: false) { [weak self] in self?.loadPage() },
+            AppMenu.Action(title: "Reset the app's data", destructive: true) { [weak self] in self?.confirmReset() },
+            AppMenu.Action(title: "Close", destructive: false) {},
+        ])
         // However it closed: an action, Close or Menu.
         menu.closed = { [weak self] in self?.web?.focusPage() }
         present(menu, animated: true)
@@ -419,12 +427,21 @@ final class MainViewController: UIViewController, RemoteReceiver {
 
     private func receive(_ message: Message) {
         guard let type = message.text("type") else { return }
-        if player?.handle(type, message) == true { return }
+        if player?.handle(type, message) == true {
+            // A load, a stop or a new item may show or hide the player's picture-in-picture button.
+            updatePipButton()
+            return
+        }
         switch type {
         case "hello":
             connected = true
             status.isHidden = true
             web?.focusPage()
+            pipButtonShown = false
+            updatePipButton()
+        case "tvos-pip":
+            // The player's picture-in-picture button, which the bridge script adds.
+            pip?.start()
         case "app-info":
             sendToPage(AppAnswers.appInfo(engine: engine))
         case "player-engine":
