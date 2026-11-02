@@ -1,25 +1,20 @@
-import AVFoundation
+import AetherHost
 import UIKit
 
-/// The view mpv draws into: its own layer is the display layer vo_avfoundation hands frames to.
-final class SampleBufferView: UIView {
-    override class var layerClass: AnyClass { AVSampleBufferDisplayLayer.self }
-    var displayLayer: AVSampleBufferDisplayLayer { layer as! AVSampleBufferDisplayLayer }
-}
-
 /**
- * mpv's video beneath, the web app over it, and the bridge between them.
- * The web side follows the working aiostreams-tvos project: a WKWebView loaded
- * at runtime, given the whole screen, focused so the page's focus ring shows,
- * and the remote taken at the window and handed to the page as keys.
+ * AetherEngine's video beneath, its subtitles over it, the web app over both,
+ * and the bridge between them. The web side follows the working
+ * aiostreams-tvos project: a WKWebView loaded at runtime, given the whole
+ * screen, focused so the page's focus ring shows, and the remote taken at the
+ * window and handed to the page as keys.
  */
 final class MainViewController: UIViewController, RemoteReceiver {
-    private let videoView = SampleBufferView()
+    private let videoView = AetherPlayerView(frame: .zero)
+    private let subtitleView = SubtitleOverlay(frame: .zero)
     private var web: AIOWebView?
     private let status = UILabel()
-    private var engine: MPVEngine?
+    private var engine: AetherPlayer?
     private var player: PlayerChannel?
-    private var pip: PictureInPicture?
     private let input = RemoteInput()
     private let storage = WebStorage()
     /// The page has said hello, so it takes Back.
@@ -32,15 +27,15 @@ final class MainViewController: UIViewController, RemoteReceiver {
         super.viewDidLoad()
         view.backgroundColor = .black
         AppFolders.create()
-        MPVConfig.writeFile()
 
-        videoView.frame = view.bounds
-        videoView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        videoView.isHidden = true
-        videoView.isUserInteractionEnabled = false
+        for pane in [videoView, subtitleView] as [UIView] {
+            pane.frame = view.bounds
+            pane.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            pane.isHidden = true
+            pane.isUserInteractionEnabled = false
+            view.addSubview(pane)
+        }
         videoView.backgroundColor = .black
-        videoView.displayLayer.videoGravity = .resizeAspect
-        view.addSubview(videoView)
 
         status.frame = view.bounds.insetBy(dx: 160, dy: 160)
         status.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -147,17 +142,6 @@ final class MainViewController: UIViewController, RemoteReceiver {
         }
     }
 
-    /// What the page was last told about the player's picture-in-picture button.
-    private var pipButtonShown = false
-
-    /// Shown while a video plays and the page's Picture-in-picture setting is on.
-    private func updatePipButton() {
-        let offered = pip?.offered == true
-        guard offered != pipButtonShown else { return }
-        pipButtonShown = offered
-        callTV("pip(\(offered))")
-    }
-
     private func sendToPage(_ message: Message) {
         guard let json = JSON.string(message) else { return }
         web?.evaluateJavaScript("window.__aioReceive&&window.__aioReceive(\(json))")
@@ -175,81 +159,21 @@ final class MainViewController: UIViewController, RemoteReceiver {
 
     private func startPlayer() {
         do {
-            let fonts = Bundle.main.url(forResource: "Fonts", withExtension: nil)
-            let engine = try MPVEngine(layer: videoView.displayLayer, configDir: AppFolders.mpv, fontsDir: fonts)
+            let engine = try AetherPlayer(view: videoView, subtitles: subtitleView)
             self.engine = engine
-            let player = PlayerChannel(
-                engine: engine,
+            // Match Content's HDR10, HLG, Dolby Vision and frame rate are the engine's own to ask tvOS for.
+            player = PlayerChannel(
+                player: engine,
                 subtitlesDir: AppFolders.subtitles,
                 send: { [weak self] in self?.sendToPage($0) },
-                showVideo: { [weak self] in self?.videoView.isHidden = !$0 }
+                showVideo: { [weak self] shown in
+                    self?.videoView.isHidden = !shown
+                    self?.subtitleView.isHidden = !shown
+                }
             )
-            // HDR10, HLG or SDR at the video's frame rate, where Match Content is on.
-            player.onStatsPage = { [weak self] page in self?.showStats(page) }
-            player.onVideoFormat = { [weak self] format in
-                let window = self?.view.window
-                if let format { DisplayMode.apply(format, in: window) } else { DisplayMode.reset(in: window) }
-            }
-            self.player = player
-            let pip = PictureInPicture(
-                layer: videoView.displayLayer, player: player, engine: engine,
-                send: { [weak self] in self?.sendToPage($0) }
-            )
-            pip.failed = { [weak self] in self?.flashStatus($0) }
-            pip.ended = { [weak self] in
-                self?.web?.focusPage()
-                self?.updatePipButton()
-            }
-            player.onPlaybackChanged = { [weak pip] in pip?.playbackChanged() }
-            player.onStopped = { [weak pip] in pip?.stop() }
-            self.pip = pip
         } catch {
-            NSLog("[app] mpv did not start: %@", String(describing: error))
+            NSLog("[app] AetherEngine did not start: %@", String(describing: error))
         }
-    }
-
-    // MARK: Statistics
-
-    private var statsLabel: UILabel?
-    private var statsTimer: Timer?
-    private var statsPage: String?
-
-    /// Over the page, top left, refreshed every second while a page of statistics shows.
-    private func showStats(_ page: String?) {
-        statsPage = page
-        statsTimer?.invalidate()
-        statsTimer = nil
-        guard let page else {
-            statsLabel?.removeFromSuperview()
-            statsLabel = nil
-            return
-        }
-        let label: UILabel
-        if let shown = statsLabel {
-            label = shown
-        } else {
-            label = PaddedLabel()
-            label.numberOfLines = 0
-            label.font = .monospacedSystemFont(ofSize: 22, weight: .regular)
-            label.textColor = .white
-            label.backgroundColor = UIColor(white: 0, alpha: 0.7)
-            label.layer.cornerRadius = 12
-            label.layer.masksToBounds = true
-            label.isUserInteractionEnabled = false
-            view.addSubview(label)
-            statsLabel = label
-        }
-        let refresh = { [weak self] in
-            self?.engine?.stats(page: page) { text in
-                guard let self, self.statsPage == page, let label = self.statsLabel else { return }
-                label.text = text
-                let size = label.sizeThatFits(CGSize(width: self.view.bounds.width * 0.6, height: .greatestFiniteMagnitude))
-                label.frame = CGRect(origin: CGPoint(x: 80, y: 60), size: size)
-            }
-        }
-        refresh()
-        view.bringSubviewToFront(label)
-        statsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in refresh() }
     }
 
     // MARK: Remote
@@ -287,23 +211,12 @@ final class MainViewController: UIViewController, RemoteReceiver {
 
     // MARK: The app's own screens
 
-    /// mpv's view of the video, read off the main thread.
-    private func readVideo(_ done: @escaping ([String: String]) -> Void) {
-        guard let engine else { return done([:]) }
-        engine.properties(AppAnswers.videoProperties, done: done)
-    }
-
+    /// With how the video and its sound play, to see why HDR or Atmos doesn't reach the TV.
     private func showAppMenu() {
-        guard presentedViewController == nil else { return }
-        readVideo { [weak self] video in self?.presentAppMenu(video: video) }
-    }
-
-    /// With how the video plays and what the TV was asked for, to see why HDR doesn't reach the TV.
-    private func presentAppMenu(video: [String: String]) {
         guard presentedViewController == nil else { return }
         // In steps: as one expression, the compiler gives up type-checking it.
         var lines: [String] = ["App \(Identity.version) · web app \(WebApp.commit) · \(storage.keyCount) saved keys", ""]
-        lines += AppAnswers.videoLines(video, window: view.window)
+        lines += AppAnswers.videoLines(player: engine, window: view.window)
         lines.append("")
         lines += MemoryLog.report
         lines.append("")
@@ -427,26 +340,19 @@ final class MainViewController: UIViewController, RemoteReceiver {
 
     private func receive(_ message: Message) {
         guard let type = message.text("type") else { return }
-        if player?.handle(type, message) == true {
-            // A load, a stop or a new item may show or hide the player's picture-in-picture button.
-            updatePipButton()
-            return
-        }
+        if player?.handle(type, message) == true { return }
         switch type {
         case "hello":
             connected = true
             status.isHidden = true
             web?.focusPage()
-            pipButtonShown = false
-            updatePipButton()
-        case "tvos-pip":
-            // The player's picture-in-picture button, which the bridge script adds.
-            pip?.start()
         case "app-info":
-            sendToPage(AppAnswers.appInfo(engine: engine))
+            sendToPage(AppAnswers.appInfo())
         case "player-engine":
-            // The page asks for its engine choice; this app has only mpv.
-            sendToPage(["type": "player-engine", "name": "mpv"])
+            // The page asks for its engine choice; this app has only AetherEngine. Like the Android app's
+            // ExoPlayer, it plays on the system's decoders and has no mpv options, so the page treats it as
+            // that: it hides mpv's settings and asks for ExoPlayer-style statistics (`player-stats`).
+            sendToPage(["type": "player-engine", "name": "exoplayer"])
         case "fullscreen":
             sendToPage(["type": "fullscreen", "value": true])
         case "levels":
@@ -463,20 +369,13 @@ final class MainViewController: UIViewController, RemoteReceiver {
             TopShelf.publish(message)
         case "tvos-keyboard":
             showKeyboard(message)
-        case "mpv-config":
-            sendToPage(["type": "mpv-config", "text": MPVConfig.text])
-        case "mpv-config-save":
-            MPVConfig.save(message.text("text") ?? "")
-            engine?.reloadConfig()
+        case "mpv-config", "mpv-config-save":
             sendToPage(["type": "mpv-config", "text": MPVConfig.text])
         case "diagnostics":
-            readVideo { [weak self] video in
-                guard let self else { return }
-                self.sendToPage(AppAnswers.diagnostics(
-                    engine: self.engine, video: video, window: self.view.window,
-                    web: message.text("web"), server: message.text("server")
-                ))
-            }
+            sendToPage(AppAnswers.diagnostics(
+                player: engine, window: view.window,
+                web: message.text("web"), server: message.text("server")
+            ))
         case "licenses":
             sendToPage(AppAnswers.licenses)
         case "crash-report":
@@ -484,7 +383,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
         case "update-check", "update-apply":
             sendToPage(AppAnswers.updateState)
         case "youtube-resolve":
-            // A trailer: its stream, for mpv. Without one the page opens the link, which the YouTube app takes.
+            // A trailer: its stream, for the player. Without one the page opens the link, which the YouTube app takes.
             let request = message.text("request") ?? ""
             YouTube.resolve(message.text("id") ?? "") { [weak self] url in
                 self?.sendToPage(["type": "youtube-resolved", "request": request, "url": nullable(url)])
@@ -505,27 +404,11 @@ final class MainViewController: UIViewController, RemoteReceiver {
     func appWillResignActive() {
         storage.save()
         input.stopRepeating()
-        pip?.appWillResignActive()
-        // The picture-in-picture window keeps playing over the Home screen.
-        if pip?.active != true { player?.change(Change(paused: true)) }
+        player?.change(Change(paused: true))
     }
 
+    /// The player opens a video again that tvOS made it let go of in the background (`AetherPlayer`).
     func appDidBecomeActive() {
-        pip?.appDidBecomeActive()
         web?.focusPage()
-    }
-}
-
-/// A label with room around its text, for the statistics.
-private final class PaddedLabel: UILabel {
-    private let inset = UIEdgeInsets(top: 16, left: 20, bottom: 16, right: 20)
-
-    override func drawText(in rect: CGRect) {
-        super.drawText(in: rect.inset(by: inset))
-    }
-
-    override func sizeThatFits(_ size: CGSize) -> CGSize {
-        let inner = super.sizeThatFits(CGSize(width: size.width - inset.left - inset.right, height: size.height))
-        return CGSize(width: inner.width + inset.left + inset.right, height: inner.height + inset.top + inset.bottom)
     }
 }

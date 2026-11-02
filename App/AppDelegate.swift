@@ -1,4 +1,3 @@
-import AVFoundation
 import UIKit
 
 @main
@@ -10,7 +9,8 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
-        setUpAudio()
+        // Declared, not activated: the player activates it per video, so the HDMI route opens at full width.
+        AudioOutput.declare()
         // Takes the remote before WebKit's content view, which is first responder.
         let window = AppWindow(frame: UIScreen.main.bounds)
         window.rootViewController = main
@@ -69,17 +69,5 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         guard backgroundTask != .invalid else { return }
         UIApplication.shared.endBackgroundTask(backgroundTask)
         backgroundTask = .invalid
-    }
-
-    /// Movie playback, with as many channels as the TV's output takes.
-    private func setUpAudio() {
-        let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playback, mode: .moviePlayback)
-            try session.setActive(true)
-            try session.setPreferredOutputNumberOfChannels(session.maximumOutputNumberOfChannels)
-        } catch {
-            NSLog("[app] audio session: %@", error.localizedDescription)
-        }
     }
 }

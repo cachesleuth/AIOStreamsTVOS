@@ -20,7 +20,8 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-15
+    # AetherEngine supports Xcode 27 (Swift 6.4) only; GitHub's xcode-27 image is the one its own CI uses.
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v4
 
@@ -35,19 +36,21 @@ jobs:
           corepack enable
           bash scripts/fetch-web.sh
 
-      # 250 MB, so it's kept between runs; fetch-mpvkit.sh checks the version and hash.
-      - uses: actions/cache@v4
-        with:
-          path: .build/mpvkit
-          key: mpvkit-${{ hashFiles('scripts/fetch-mpvkit.sh') }}
-
-      - name: Fetch MPVKit
-        run: bash scripts/fetch-mpvkit.sh
+      - name: Show the toolchain
+        run: |
+          xcodebuild -version
+          swift --version
 
       - name: Generate the Xcode project
         run: |
           brew install xcodegen
           xcodegen generate
+
+      # AetherEngine's packages (FFmpegBuild's frameworks are the bulk), kept between runs.
+      - uses: actions/cache@v4
+        with:
+          path: build/SourcePackages
+          key: spm-${{ hashFiles('Packages/AetherHost/Package.swift') }}
 
       - name: Build for Apple TV
         run: |
@@ -67,8 +70,15 @@ jobs:
           test -d "$app" || { echo "No app at $app"; ls -R build/Build/Products; exit 1; }
           shelf="$app/PlugIns/AIOStreamsTopShelf.appex"
           test -d "$shelf" || { echo "No Top Shelf extension at $shelf"; exit 1; }
+          # AetherEngine's FFmpeg is dynamic frameworks in the app; without them nothing plays.
+          ls "$app/Frameworks" | grep -q '^AetherLibavcodec.framework$' \
+            || { echo "No AetherLibavcodec.framework in $app/Frameworks"; ls -la "$app/Frameworks" || true; exit 1; }
           # An ad-hoc signature carrying the App Group the app and its Top Shelf share,
-          # which sideloading tools read when they re-sign. Inside out: the extension first.
+          # which sideloading tools read when they re-sign. Inside out: the frameworks
+          # and the extension first, as a bundle can't be signed around unsigned code.
+          for framework in "$app"/Frameworks/*; do
+            codesign --force --sign - --timestamp=none "$framework"
+          done
           codesign --force --sign - --timestamp=none --entitlements TopShelf/TopShelf.entitlements "$shelf"
           codesign --force --sign - --timestamp=none --entitlements App/AIOStreamsTV.entitlements "$app"
           codesign -d --entitlements - "$app"

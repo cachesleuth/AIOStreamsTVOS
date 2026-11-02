@@ -26,44 +26,28 @@ enum Identity {
 /// The app's folders. tvOS keeps only caches on disk, which it may clear when space runs low.
 enum AppFolders {
     static let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-    static let mpv = caches.appendingPathComponent("mpv", isDirectory: true)
-    static let shaders = caches.appendingPathComponent("shaders", isDirectory: true)
     static let subtitles = caches.appendingPathComponent("subtitles", isDirectory: true)
 
     static func create() {
-        for folder in [mpv, shaders, subtitles] {
-            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: subtitles, withIntermediateDirectories: true)
+        // mpv's folders, from before the app played with AetherEngine.
+        for old in ["mpv", "shaders"] {
+            try? FileManager.default.removeItem(at: caches.appendingPathComponent(old, isDirectory: true))
         }
     }
 }
 
-/// The user's mpv.conf, kept in the defaults and written where mpv reads it at each start.
+/**
+ * What the page's mpv.conf editor shows. The page offers it while its engine
+ * setting says mpv, but this app plays with AetherEngine, which has no
+ * config file, so saving changes nothing.
+ */
 enum MPVConfig {
-    private static let key = "aiostreams.mpvConf"
-    static var file: URL { AppFolders.mpv.appendingPathComponent("mpv.conf") }
-
-    static let starter = """
-    # mpv's own options, read at start and when saved here.
-    # See https://mpv.io/manual/stable/#options. The app keeps idle, keep-open,
-    # force-window, osc, osd-bar, ytdl and the key bindings as it needs them.
-    #
-    # profile=fast
-    # deband=yes
+    static let text = """
+    # This app plays with AetherEngine, not mpv, so options here do nothing.
+    # Sound and subtitle settings are under Settings → Playback.
 
     """
-
-    static var text: String {
-        UserDefaults.standard.string(forKey: key) ?? starter
-    }
-
-    static func save(_ text: String) {
-        UserDefaults.standard.set(text, forKey: key)
-        writeFile()
-    }
-
-    static func writeFile() {
-        try? text.write(to: file, atomically: true, encoding: .utf8)
-    }
 }
 
 /**
@@ -118,43 +102,39 @@ enum MemoryLog {
 }
 
 /// Answers to the page's requests about the app itself.
+@MainActor
 enum AppAnswers {
-    static func appInfo(engine: MPVEngine?) -> Message {
+    static func appInfo() -> Message {
         [
             "type": "app-info",
             "app": "\(Identity.version) (tvOS)",
             "platform": "android",
-            "mpv": nullable(engine?.property("mpv-version")),
-            "ffmpeg": nullable(engine?.property("ffmpeg-version")),
+            "mpv": NSNull(),
+            "ffmpeg": "FFmpeg in AetherEngine \(AetherPlayer.version)",
+            "player": "AetherEngine \(AetherPlayer.version)",
             "ac3Encoder": false,
         ]
     }
 
-    /// The mpv properties `videoLines` reads.
-    static let videoProperties = [
-        "current-vo", "hwdec-current", "video-params/pixelformat", "video-params/primaries", "video-params/gamma",
-    ]
-
-    /// How the video plays and what the TV was asked for, from `videoProperties`' values.
-    static func videoLines(_ values: [String: String], window: UIWindow?) -> [String] {
-        let matching = DisplayMode.matchingEnabled(in: window).map { $0 ? "on" : "off" } ?? "unknown"
-        return [
-            "Video output: \(values["current-vo"] ?? "none")",
-            "Decoder: \(values["hwdec-current"] ?? "none")",
-            "Pixel format: \(values["video-params/pixelformat"] ?? "none")",
-            "Colours: \(values["video-params/primaries"] ?? "?"), \(values["video-params/gamma"] ?? "?")",
-            "Match Content: \(matching)",
-            "Display request: \(DisplayMode.lastReport)",
-        ]
+    /// How the video and its sound play, what the TV does with them, and the engine's latest audio lines.
+    static func videoLines(player: AetherPlayer?, window: UIWindow?) -> [String] {
+        let matching = window.map { $0.avDisplayManager.isDisplayCriteriaMatchingEnabled ? "on" : "off" } ?? "unknown"
+        var lines = player?.report ?? ["Player: not started"]
+        lines.append("Match Content: \(matching)")
+        let audio = EngineLogBook.recentAudio
+        if !audio.isEmpty {
+            lines.append("")
+            lines.append("Engine's audio log, newest last:")
+            lines += audio
+        }
+        return lines
     }
 
-    static func diagnostics(engine: MPVEngine?, video: [String: String], window: UIWindow?, web: String?, server: String?) -> Message {
+    static func diagnostics(player: AetherPlayer?, window: UIWindow?, web: String?, server: String?) -> Message {
         let lines = [
             "AIOStreams for Apple TV \(Identity.version)",
             "tvOS \(UIDevice.current.systemVersion), \(UIDevice.current.model)",
-            "mpv: \(engine?.property("mpv-version") ?? "not started")",
-            "FFmpeg: \(engine?.property("ffmpeg-version") ?? "unknown")",
-        ] + videoLines(video, window: window) + MemoryLog.report + TopShelf.report + [
+        ] + videoLines(player: player, window: window) + [""] + MemoryLog.report + TopShelf.report + [
             "Web app: \(web ?? "unknown")",
             "Server: \(server ?? "none")",
         ]
@@ -164,14 +144,14 @@ enum AppAnswers {
     static let licenses: Message = [
         "type": "licenses",
         "texts": [
-            "GNU General Public License, version 3: https://www.gnu.org/licenses/gpl-3.0.html",
-            "SIL Open Font License, version 1.1: https://openfontlicense.org",
+            "GNU Lesser General Public License, version 3, with AetherEngine's Apple Store exception: https://github.com/superuser404notfound/AetherEngine/blob/main/LICENSE",
+            "GNU Lesser General Public License, version 2.1: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html",
+            "MIT License: https://opensource.org/license/mit",
         ],
         "libraries": [
-            ["name": "MPVKit (Streamyfin build)", "licence": "GPL-3.0", "url": "https://github.com/streamyfin/MPVKit", "texts": [0]],
-            ["name": "mpv", "licence": "GPL-3.0", "url": "https://mpv.io", "texts": [0]],
-            ["name": "FFmpeg", "licence": "GPL-3.0", "url": "https://ffmpeg.org", "texts": [0]],
-            ["name": "Noto Sans", "licence": "OFL-1.1", "url": "https://notofonts.github.io", "texts": [1]],
+            ["name": "AetherEngine", "licence": "LGPL-3.0", "url": "https://github.com/superuser404notfound/AetherEngine", "texts": [0]],
+            ["name": "FFmpeg (FFmpegBuild)", "licence": "LGPL-2.1", "url": "https://github.com/superuser404notfound/FFmpegBuild", "texts": [1]],
+            ["name": "libdovi (LibDovi)", "licence": "MIT", "url": "https://github.com/quietvoid/dovi_tool", "texts": [2]],
         ] as [Message],
     ]
 

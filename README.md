@@ -1,9 +1,10 @@
 # AIOStreams for Apple TV
 
 The [AIOStreams](https://github.com/Viren070/AIOStreams) web app's standalone build (the one that
-signs in to any Jellyfin server) on tvOS, playing through mpv. The page draws every screen and the
-player's controls, unchanged; this app shows it in a web view over libmpv, as the desktop and
-Android apps do, and turns the Siri Remote into the keys the page already handles.
+signs in to any Jellyfin server) on tvOS, playing through
+[AetherEngine](https://github.com/superuser404notfound/AetherEngine). The page draws every screen
+and the player's controls, unchanged; this app shows it in a web view over the player, as the
+desktop and Android apps do, and turns the Siri Remote into the keys the page already handles.
 
 It is unofficial and experimental. It uses private tvOS APIs, so it can't go on the App Store; the
 IPA is sideloaded.
@@ -14,7 +15,8 @@ IPA is sideloaded.
 ┌──────────────────────────── screen ────────────────────────────┐
 │  WKWebView, transparent: the web app and its player controls   │
 │        ▲  window.aiostreamsApp: JSON messages both ways        │
-│  AVSampleBufferDisplayLayer: mpv's frames, HDR metadata kept   │
+│  SubtitleOverlay: the engine's subtitles, in the page's style  │
+│  AetherPlayerView: AVPlayer's picture, or the engine's own     │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -37,24 +39,61 @@ page the same way:
 - **The bridge** is the page's `window.aiostreamsApp`, added by a user script at document start.
   Page to app goes through `webkit.messageHandlers.aiostreamsNative`; app to page through
   `evaluateJavaScript`, which never blocks the app.
-- **mpv** comes from Streamyfin's [MPVKit](https://github.com/streamyfin/MPVKit) build (GPL), the
-  one the working aiostreams-tvos project uses, fetched by `scripts/fetch-mpvkit.sh`. Its
-  `vo_avfoundation` output hands VideoToolbox's frames to an `AVSampleBufferDisplayLayer` with their
-  HDR metadata. `MPVEngine` and `PlayerChannel` otherwise follow AIOStreams' Android `MpvEngine` and
-  `PlayerChannel`: the same observed properties and messages.
+- **The player** is [AetherEngine](https://github.com/superuser404notfound/AetherEngine) (LGPL),
+  added through Swift Package Manager by the local package `Packages/AetherHost`. FFmpeg reads the
+  file and repackages it for AVPlayer, so VideoToolbox decodes and tvOS presents the video and sound
+  as it does for its own apps; what AVPlayer can't decode (AV1 without hardware, VP9, MPEG-2, VC-1)
+  the engine decodes itself. `AetherPlayer` and `PlayerChannel` follow AIOStreams' Android
+  `PlayerChannel`: the same messages, so the page is unchanged.
+- **`Packages/AetherHost`** pins the engine's version and re-exports it. The engine's optional
+  components (TrueHD Atmos and DTS:X object rendering among them) are package traits, which
+  XcodeGen can't set, so they would be turned on there; they're all off.
+
+### Dolby Atmos
+
+The point of the switch from mpv, which decodes every sound itself and so sends a receiver plain
+PCM and never Atmos.
+
+- **E-AC-3 with Atmos (Dolby Digital Plus JOC)**, the Atmos of streaming services and most web
+  releases, is copied into the stream AVPlayer plays untouched, and tvOS sends it to the receiver
+  as Dolby MAT. The receiver shows Dolby Atmos.
+- **TrueHD, DTS and DTS-HD** can't leave an Apple TV as a bitstream, so they're decoded to
+  lossless multichannel PCM (up to 7.1), as Infuse plays them, whatever the passthrough setting.
+  TrueHD Atmos and DTS:X play as their 7.1, without the objects and heights. A receiver takes PCM
+  over HDMI or eARC; a soundbar behind a TV's plain ARC gets stereo.
+- **What turns Atmos off**: the page's Audio channels set to Stereo or 5.1 (the engine decodes the
+  sound to fit), and any output but HDMI, which alone carries Dolby MAT: Bluetooth gets a stereo
+  mix, AirPods a spatial render. So does video the engine decodes itself (AV1, which no Apple TV
+  decodes in hardware, VP9, or anything with Hardware decoding off): it plays an E-AC-3 Atmos
+  track's 5.1 or 7.1 bed as PCM.
+- **The audio session** is only activated when a video starts. Activating it at launch, as the mpv
+  build did, fixes the HDMI route at what the link reported then, which with Continuous Audio
+  Connection off is 2 channels (AetherEngine#24).
+
+For Atmos at all, set **Settings → Video and Audio → Audio Format** to **Auto** (or Change Format →
+**Dolby Atmos**) on the Apple TV. The player's statistics show the track, its decoder and the
+output: `E-AC-3 Atmos passthrough` is Atmos on its way to the receiver. The app
+menu (hold Play/Pause) and the diagnostics add the audio route and the engine's recent audio log.
 
 ### HDR
 
-- **HDR10 and HLG** reach the TV as HDR. When a video starts, `DisplayMode` asks tvOS for the
-  matching TV mode (HDR10, HLG or SDR) at the video's frame rate, and goes back to the TV's own mode
-  when playback ends. tvOS only switches with **Settings → Video and Audio → Match Content**
-  (Dynamic Range, and Frame Rate if you want that too) turned on.
-- Subtitles are drawn by libass with the bundled Noto Sans (SIL Open Font License), as libass can't
-  open tvOS's own fonts.
+- **HDR10, HDR10+, HLG and Dolby Vision** reach the TV in their own mode. The engine asks tvOS for
+  the matching TV mode at the video's frame rate before it plays, and for the TV's own mode when
+  playback stops. tvOS only switches with **Settings → Video and Audio → Match Content** (Dynamic
+  Range, and Frame Rate if you want that too) turned on. Dolby Vision profile 7 plays as
+  single-layer profile 8.1, and on a TV without Dolby Vision, Dolby Vision plays as HDR10.
+
+### Subtitles
+
+The engine decodes them, text, ASS and PGS, DVB and DVD pictures, and the app draws them over the
+video in the page's style (`App/Player/SubtitleOverlay.swift`): colour, outline, shadow, box, size
+and position, in the units the page sends for mpv. ASS files keep their colours, bold, italics and
+`\an` placement unless the page's style overrides them, but not their fonts or effects, which
+libass drew before.
 
 ### Trailers
 
-YouTube trailers play in mpv. The app asks YouTube's player API for the video's stream, as
+YouTube trailers play in the player. The app asks YouTube's player API for the video's stream, as
 AIOStreams' desktop and Android apps do (`App/Player/YouTube.swift`). Where YouTube gives none,
 the page opens the trailer's link, which goes to the YouTube app if it's installed.
 
@@ -66,28 +105,18 @@ remote's scrub row, as in AIOStreams' desktop and Android apps. The app answers 
 sent again, and each picture is a 384-pixel-wide JPEG the page loads from
 `aiostv://localhost/thumbnail/…` (the newest 256 are kept).
 
-Those apps make the pictures with AIOStreams' own keyframe reader, which loads FFmpeg as a shared
-library. tvOS's FFmpeg is linked into MPVKit, so silent mpvs make them here
-(`App/Player/Thumbnails.swift`): each opens the file paused with no audio or cache, seeks to
-keyframes only, and renders each through libmpv's software renderer. HDR10 and HLG pictures are
-tone mapped to SDR.
-
-Two of them run, as most of a picture's wait is the network. One is kept for the page's next ask.
-The other finds the remote's scrub row's pictures, a seek step apart, up to four steps either side
-of the row's latest ask, before the page asks for them one by one. Both close after 45 seconds
-without an ask, and open the file again on the next one.
+AetherEngine's `FrameExtractor` makes them (`App/Player/Thumbnails.swift`): a decoder of its own on
+the file that seeks to keyframes, tone maps HDR and Dolby Vision to SDR, and holds back while the
+playing video is short of data. Asks are rounded to the second, so the scrub row's repeats come
+from what's already made. It closes after 45 seconds without an ask, and opens the file again on
+the next one.
 
 ### Picture in picture
 
-There is none. tvOS never allows picture-in-picture for an `AVSampleBufferDisplayLayer`, the layer
-mpv draws into: `isPictureInPicturePossible` stays false from tvOS 15 to at least tvOS 26, as
-[PiPBugDemo](https://github.com/jazzychad/PiPBugDemo) shows (Apple feedback FB9751461), while the
-same code works on iOS. tvOS only puts Apple's own player (`AVPlayer`) in the window, and mpv plays
-outside it. The app tells the page it has none (`pip: false`), so the page hides its setting.
-
-`App/Player/PictureInPicture.swift` is kept, switched off (`PictureInPicture.enabled`), for a tvOS
-that fixes it: on, with `pip: true` in the bridge script and the `audio` background mode, it adds a
-button to the player's bottom row that moves mpv's video into the window.
+There is none yet, and the page's setting is hidden (`pip: false` in the bridge script). mpv's
+display layer could never go in tvOS's window (Apple feedback FB9751461); the engine's AVPlayer
+layer can in principle, but it isn't wired up, and the long-form audio policy the engine declares
+for HDMI is known to block picture in picture on iOS and is untested here on tvOS.
 
 ### Top Shelf
 
@@ -134,14 +163,14 @@ app on a TV (`platform: 'android'`, `tv: true`). That gets the TV layout, remote
 Back behaviour and the bundled-player path. It also means:
 
 - Jellyfin lists the device as **AIOStreams Android TV**.
-- Settings shows an **Android app** section. Its mpv.conf editor works; updates show as off, and
-  **Play in the background** does nothing (leaving the app pauses the video).
+- Settings shows an **Android app** section. Updates show as off, **Play in the background** does
+  nothing (leaving the app pauses the video), and its mpv.conf editor, shown while the player
+  engine setting says mpv, says that nothing in it applies.
 - Android-only playback settings (frame rate matching, tunnelling) show and do nothing.
-- The **player engine** setting does nothing: mpv always plays, and the app answers the page that it
-  plays with mpv, so the page shows mpv's options and statistics. The **Play with ExoPlayer** retry
-  the page offers after a failed load, when the setting isn't Automatic, does nothing either.
-- mpv's statistics overlay is a Lua script, which tvOS's libmpv lacks, so the app draws its own
-  from mpv's properties: the same pages (Playback, Frame timings, Cache, Tracks), as plain text.
+- The **player engine** setting does nothing: AetherEngine always plays. The app answers the page
+  that it plays with ExoPlayer, which like AetherEngine plays on the system's decoders, so the page
+  hides mpv's options and shows ExoPlayer's statistics, filled in from the engine. The **Play with
+  mpv** retry the page offers after a failed load, when the setting isn't Automatic, does nothing.
 
 ## The remote
 
@@ -176,14 +205,18 @@ attaches it as an artifact, each push to `main` replaces the **Nightly** release
 publishes a release of its own. Sign it with your own Apple ID using a sideloading tool that
 handles Apple TV; with a free Apple ID the signature lasts 7 days, with a paid account a year.
 
-On a Mac with Xcode 16 or later, [XcodeGen](https://github.com/yonaskolb/XcodeGen) and Node 22+:
+On a Mac with Xcode 27 (AetherEngine supports no older one), [XcodeGen](https://github.com/yonaskolb/XcodeGen)
+and Node 22+, for tvOS 18 or later:
 
 ```sh
 bash scripts/fetch-web.sh       # clones AIOStreams into .build/ and builds the web app into WebBuild
-bash scripts/fetch-mpvkit.sh    # downloads Streamyfin's MPVKit (250 MB) into Vendor/, checked by SHA-256
 xcodegen generate               # writes AIOStreamsTV.xcodeproj from project.yml
-open AIOStreamsTV.xcodeproj
+open AIOStreamsTV.xcodeproj     # Xcode fetches AetherEngine and its FFmpeg build through SwiftPM
 ```
+
+The engine is pinned to one version in `Packages/AetherHost/Package.swift`. Its FFmpeg comes as
+dynamic frameworks that Xcode embeds in the app; nothing else in the app may bring an FFmpeg of its
+own, or it takes the engine's symbols.
 
 `AIOSTREAMS_DIR=/path/to/AIOStreams bash scripts/fetch-web.sh` builds from a checkout you already have
 instead, and `AIOSTREAMS_REF=<branch or tag>` picks what to clone. The script only reads that repo.
@@ -195,14 +228,16 @@ Safari's Develop menu on a Mac can inspect the page.
 | -------------- | ---------------------------------------------------------------------- |
 | `App/Web`      | The WKWebView wrapper and scheme handler, the bridge script, storage   |
 | `App/Bridge`   | JSON helpers                                                           |
-| `App/Player`   | libmpv, the player messages, seek-bar thumbnails, TV modes, Now Playing and remote commands, YouTube trailers, picture in picture (off) |
+| `App/Player`   | AetherEngine, the audio session, the player messages, subtitles, seek-bar thumbnails, Now Playing and remote commands, YouTube trailers |
 | `App/Input`    | The window that takes the remote, the keys it becomes, the keyboard    |
-| `App/Support`  | Identity, folders, mpv.conf, the app menu, the app's own answers, the Top Shelf list |
+| `App/Support`  | Identity, folders, the mpv.conf note, the app menu, the app's own answers, the Top Shelf list |
 | `TopShelf`     | The Top Shelf extension: Continue Watching and Next Up                 |
 | `Shared`       | What the app and the extension both read: the saved list               |
-| `scripts`      | Building the web app into `WebBuild` and fetching MPVKit into `Vendor` (both git-ignored) |
+| `Packages`     | `AetherHost`: AetherEngine at a pinned version, for the app to link |
+| `scripts`      | Building the web app into `WebBuild` (git-ignored) |
 
 ## Licences
 
-Streamyfin's MPVKit build is GPL-3.0, so builds of this app are for personal use. Noto Sans is under
-the SIL Open Font License. The web app is AIOStreams', under its licence.
+AetherEngine is LGPL-3.0 with an app store exception, and its FFmpeg build is LGPL-2.1, linked
+dynamically. Builds of this app are for personal use. The web app is AIOStreams', under its
+licence.

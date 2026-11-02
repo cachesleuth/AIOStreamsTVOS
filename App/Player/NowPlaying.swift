@@ -1,3 +1,5 @@
+import AetherHost
+import Combine
 import MediaPlayer
 import UIKit
 
@@ -5,69 +7,69 @@ import UIKit
  * What plays, for the TV's Now Playing screen and Control Center, and the
  * commands they send, which reach the page as `media-key` messages. The page
  * drops a command that repeats a remote press it just handled.
+ *
+ * AetherEngine owns the Now Playing session bound to its AVPlayer, which
+ * publishes the position, rate and length itself; the app gives it the title
+ * and artwork and handles the commands on that session. Writing the shared
+ * Now Playing info by hand races the engine's player on tvOS 26. On the
+ * engine's software route, which has no AVPlayer, the engine answers the
+ * transport commands itself and the app adds next and previous.
  */
+@MainActor
 final class NowPlaying {
     private let send: (Message) -> Void
+    private let engine: AetherEngine
     private var item: Message?
     private var artwork: (url: String, image: MPMediaItemArtwork?)?
-    private var info: [String: Any] = [:]
-    private var commandsOn = false
+    /// The session the commands are on, so a new player gets them once.
+    private weak var session: MPNowPlayingSession?
+    private var sharedCommands = false
+    private var watching = Set<AnyCancellable>()
 
-    init(send: @escaping (Message) -> Void) {
+    init(engine: AetherEngine, send: @escaping (Message) -> Void) {
+        self.engine = engine
         self.send = send
+        // A new AVPlayer, after a load or a reload, may come with a new session.
+        engine.$currentAVPlayer
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.attach() } }
+            .store(in: &watching)
+        engine.$softwareNowPlayingActive
+            .removeDuplicates()
+            .sink { [weak self] active in self?.setSharedCommands(active) }
+            .store(in: &watching)
     }
 
     func setItem(_ item: Message?) {
         self.item = item
-        guard let item, let title = item.text("title") else {
-            info = [:]
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-            setCommands(false)
+        guard let item, item.text("title") != nil else {
+            artwork = nil
+            engine.setVideoNowPlayingInfo([:])
             return
         }
-        info[MPMediaItemPropertyTitle] = title
-        if let subtitle = item.text("subtitle") {
-            info[MPMediaItemPropertyArtist] = subtitle
-        } else {
-            info.removeValue(forKey: MPMediaItemPropertyArtist)
-        }
-        info[MPNowPlayingInfoPropertyMediaType] = MPNowPlayingInfoMediaType.video.rawValue
-        if let url = item.text("artwork") { loadArtwork(url) }
-        setCommands(true)
-        let center = MPRemoteCommandCenter.shared()
-        center.nextTrackCommand.isEnabled = item.flag("next") == true
-        center.previousTrackCommand.isEnabled = item.flag("previous") == true
+        if let url = item.text("artwork") { loadArtwork(url) } else { artwork = nil }
         publish()
+        attach()
+        updateTrackCommands()
     }
 
-    /// From the player's merged state.
-    func update(_ state: Message) {
-        guard item != nil else { return }
-        let paused = state.flag("paused") != false
-        let position = (state.number("positionMs") ?? 0) / 1000
-        let duration = (state.number("durationMs") ?? 0) / 1000
-        let rate = paused ? 0 : (state.number("speed") ?? 1)
-        // The system moves the position on by itself between updates, so only big changes go out.
-        let old = info[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? Double ?? -10
-        let oldRate = info[MPNowPlayingInfoPropertyPlaybackRate] as? Double
-        let oldDuration = info[MPMediaItemPropertyPlaybackDuration] as? Double
-        guard oldRate != rate || oldDuration != duration || abs(old + rate * 5 - position) > 5 else { return }
-        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = position
-        info[MPNowPlayingInfoPropertyPlaybackRate] = rate
-        info[MPMediaItemPropertyPlaybackDuration] = duration
-        publish()
-    }
-
+    /// The title and artwork; the engine adds the position, rate and length.
     private func publish() {
+        guard let item, let title = item.text("title") else { return }
+        var info: [String: Any] = [
+            MPMediaItemPropertyTitle: title,
+            MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.video.rawValue,
+        ]
+        if let subtitle = item.text("subtitle") { info[MPMediaItemPropertyArtist] = subtitle }
         if let image = artwork?.image { info[MPMediaItemPropertyArtwork] = image }
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        engine.setVideoNowPlayingInfo(info)
     }
 
     private func loadArtwork(_ url: String) {
         guard artwork?.url != url, let address = URL(string: url) else { return }
         artwork = (url, nil)
         URLSession.shared.dataTask(with: address) { [weak self] data, _, _ in
-            guard let data, let image = UIImage(data: data) else { return }
+            // Decoded here, off the main thread, as the system reads it from its own.
+            guard let data, let image = UIImage(data: data)?.preparingForDisplay() else { return }
             let art = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
             DispatchQueue.main.async {
                 guard let self, self.artwork?.url == url else { return }
@@ -77,42 +79,72 @@ final class NowPlaying {
         }.resume()
     }
 
-    private func key(_ key: Message) -> MPRemoteCommandHandlerStatus {
-        send(["type": "media-key", "key": key])
-        return .success
+    /// The system calls command handlers on the main thread.
+    private func handle(_ command: MPRemoteCommand, _ key: @escaping @MainActor (MPRemoteCommandEvent) -> Message?) {
+        command.addTarget { [weak self] event in
+            MainActor.assumeIsolated {
+                guard let self, let key = key(event) else { return .commandFailed }
+                self.send(["type": "media-key", "key": key])
+                return .success
+            }
+        }
     }
 
-    private func setCommands(_ on: Bool) {
-        guard on != commandsOn else { return }
-        commandsOn = on
-        let center = MPRemoteCommandCenter.shared()
-        let commands: [MPRemoteCommand] = [
-            center.playCommand, center.pauseCommand, center.togglePlayPauseCommand, center.stopCommand,
-            center.nextTrackCommand, center.previousTrackCommand, center.changePlaybackPositionCommand,
-            center.skipForwardCommand, center.skipBackwardCommand,
-        ]
-        guard on else {
-            for command in commands { command.removeTarget(nil) }
-            UIApplication.shared.endReceivingRemoteControlEvents()
-            return
-        }
-        UIApplication.shared.beginReceivingRemoteControlEvents()
-        for command in commands where command !== center.nextTrackCommand && command !== center.previousTrackCommand {
-            command.isEnabled = true
-        }
+    /// The commands on the engine's session, once per session.
+    private func attach() {
+        guard item != nil, let session = engine.videoNowPlayingSession, session !== self.session else { return }
+        self.session = session
+        let center = session.remoteCommandCenter
         center.skipForwardCommand.preferredIntervals = [10]
         center.skipBackwardCommand.preferredIntervals = [10]
-        center.playCommand.addTarget { [weak self] _ in self?.key(["action": "play"]) ?? .commandFailed }
-        center.pauseCommand.addTarget { [weak self] _ in self?.key(["action": "pause"]) ?? .commandFailed }
-        center.togglePlayPauseCommand.addTarget { [weak self] _ in self?.key(["action": "toggle"]) ?? .commandFailed }
-        center.stopCommand.addTarget { [weak self] _ in self?.key(["action": "stop"]) ?? .commandFailed }
-        center.nextTrackCommand.addTarget { [weak self] _ in self?.key(["action": "next"]) ?? .commandFailed }
-        center.previousTrackCommand.addTarget { [weak self] _ in self?.key(["action": "previous"]) ?? .commandFailed }
-        center.changePlaybackPositionCommand.addTarget { [weak self] event in
-            guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
-            return self?.key(["action": "seek", "position": event.positionTime * 1000]) ?? .commandFailed
+        for command in [center.playCommand, center.pauseCommand, center.togglePlayPauseCommand, center.stopCommand,
+                        center.changePlaybackPositionCommand, center.skipForwardCommand, center.skipBackwardCommand] {
+            command.isEnabled = true
         }
-        center.skipForwardCommand.addTarget { [weak self] _ in self?.key(["action": "skip", "offset": 10_000]) ?? .commandFailed }
-        center.skipBackwardCommand.addTarget { [weak self] _ in self?.key(["action": "skip", "offset": -10_000]) ?? .commandFailed }
+        handle(center.playCommand) { _ in ["action": "play"] }
+        handle(center.pauseCommand) { _ in ["action": "pause"] }
+        handle(center.togglePlayPauseCommand) { _ in ["action": "toggle"] }
+        handle(center.stopCommand) { _ in ["action": "stop"] }
+        handle(center.changePlaybackPositionCommand) { event in
+            guard let event = event as? MPChangePlaybackPositionCommandEvent else { return nil }
+            return ["action": "seek", "position": event.positionTime * 1000]
+        }
+        handle(center.skipForwardCommand) { _ in ["action": "skip", "offset": 10_000] }
+        handle(center.skipBackwardCommand) { _ in ["action": "skip", "offset": -10_000] }
+        handle(center.nextTrackCommand) { _ in ["action": "next"] }
+        handle(center.previousTrackCommand) { _ in ["action": "previous"] }
+        updateTrackCommands()
+    }
+
+    /// Next and previous, where the page has them for the item.
+    private func updateTrackCommands() {
+        let next = item?.flag("next") == true
+        let previous = item?.flag("previous") == true
+        if let center = session?.remoteCommandCenter {
+            center.nextTrackCommand.isEnabled = next
+            center.previousTrackCommand.isEnabled = previous
+        }
+        if sharedCommands {
+            let shared = MPRemoteCommandCenter.shared()
+            shared.nextTrackCommand.isEnabled = next
+            shared.previousTrackCommand.isEnabled = previous
+        }
+    }
+
+    /// While the engine publishes Now Playing for its software route, on the shared centre it uses.
+    private func setSharedCommands(_ on: Bool) {
+        guard on != sharedCommands else { return }
+        sharedCommands = on
+        let shared = MPRemoteCommandCenter.shared()
+        shared.nextTrackCommand.removeTarget(nil)
+        shared.previousTrackCommand.removeTarget(nil)
+        guard on else {
+            shared.nextTrackCommand.isEnabled = false
+            shared.previousTrackCommand.isEnabled = false
+            return
+        }
+        handle(shared.nextTrackCommand) { _ in ["action": "next"] }
+        handle(shared.previousTrackCommand) { _ in ["action": "previous"] }
+        updateTrackCommands()
     }
 }

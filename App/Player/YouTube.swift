@@ -2,7 +2,7 @@ import Foundation
 
 /**
  * A YouTube video's stream for a trailer, asked of YouTube's player API as
- * YouTube's own apps ask, so mpv can play it. Follows AIOStreams' desktop
+ * YouTube's own apps ask, so the player can play it. Follows AIOStreams' desktop
  * `core/src/youtube.rs` and Android `YouTube.kt`: the same clients, in the
  * same order. The links only play from the address that asked, so the app
  * resolves them itself rather than the page.

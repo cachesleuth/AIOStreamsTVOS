@@ -2,8 +2,8 @@ import Foundation
 
 /*
  * The page's player messages, as the desktop and Android apps read them
- * (AIOStreams' packages/android/playback Player.kt). The page names no mpv
- * command or property; each field is checked before mpv sees it.
+ * (AIOStreams' packages/android/playback Player.kt). Each field is checked
+ * before the player sees it.
  */
 
 struct ProtocolError: Error {
@@ -46,7 +46,7 @@ enum Fit {
     case fit, crop, stretch
 }
 
-/// Colours are `#AARRGGBB` or `#RRGGBB`, sizes in mpv's units.
+/// Colours are `#AARRGGBB` or `#RRGGBB`, sizes in mpv's units (a 720-line picture), which the page sends for every app.
 struct SubtitleLook {
     let scale: Double
     let bold: Bool
@@ -54,7 +54,7 @@ struct SubtitleLook {
     let outlineColor: String
     let outlineSize: Double
     let shadowSize: Double
-    /// A family libass finds through Core Text, or nil for mpv's own.
+    /// A font family, or nil for the system's.
     let font: String?
     let backColor: String
     let box: Bool
@@ -69,12 +69,14 @@ struct Style {
 }
 
 /// The settings the page sends that the player applies itself.
-struct PlayerSettings {
+struct PlayerSettings: Equatable {
     var hardwareDecoding = true
     /// `auto`, `stereo`, `5.1` or `7.1`.
     var audioChannels = "auto"
-    /// In mpv's `audio-spdif` names.
+    /// The formats the receiver takes, in mpv's `audio-spdif` names: `ac3`, `eac3`, `dts`, `dts-hd`, `truehd`.
     var passthrough: [String] = []
+    /// The page's Automatic: whatever the output takes, which on an Apple TV is decided by tvOS.
+    var passthroughAuto = false
     var audioDelayMs = 0.0
     /// Megabytes of the stream to hold, 0 for the app's default.
     var cacheMb = 0
@@ -148,8 +150,8 @@ enum PlayerProtocol {
         var settings = PlayerSettings()
         settings.hardwareDecoding = message.flag("hardwareDecoding") != false
         settings.audioChannels = message.text("audioChannels") ?? "auto"
-        // `passthroughAuto` keeps the formats the output decodes, which this app can't ask tvOS for.
-        if message.flag("passthroughAuto") != true {
+        settings.passthroughAuto = message.flag("passthroughAuto") == true
+        if !settings.passthroughAuto {
             settings.passthrough = (message["passthrough"] as? [Any])?
                 .compactMap { $0 as? String }
                 .filter { passthroughFormats.contains($0) } ?? []
@@ -159,7 +161,7 @@ enum PlayerProtocol {
         return settings
     }
 
-    /// The page's font names, which are Android's. libass here can only open the bundled Noto Sans, so all of them get it.
+    /// The page's font names, which are Android's. All of them get the system font.
     private static func font(_ name: String) throws -> String? {
         switch name {
         case "sans-serif", "serif", "monospace", "serif-monospace", "casual", "cursive": return nil
@@ -181,9 +183,7 @@ enum PlayerProtocol {
             guard let text = raw as? String,
                   !name.isEmpty,
                   name.unicodeScalars.allSatisfy(headerNameCharacters.contains),
-                  text.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value <= 0x7e }),
-                  // A backslash before mpv's list separator would escape it.
-                  !text.hasSuffix("\\")
+                  text.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value <= 0x7e })
             else { throw ProtocolError("header \(name) is not allowed") }
             headers[name] = text
         }

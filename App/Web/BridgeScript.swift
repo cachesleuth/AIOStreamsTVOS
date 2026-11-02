@@ -4,7 +4,7 @@ import Foundation
  * The script WebKit runs at document start, in the main frame, before the
  * page's own. It gives the page `window.aiostreamsApp`, the bridge AIOStreams'
  * Android app gives it (protocol 2), so the unmodified web app lays itself
- * out for a TV and plays through this app's mpv. Follows bridge.js of the
+ * out for a TV and plays through this app's player. Follows bridge.js of the
  * working aiostreams-tvos project.
  *
  * Page to app: `webkit.messageHandlers.aiostreamsNative.postMessage(json)`.
@@ -137,7 +137,7 @@ enum BridgeScript {
     tv: true,
     voice: false,
     gamepads: false,
-    // Hides the page's Picture-in-picture setting: tvOS doesn't allow it for mpv's display layer (see PictureInPicture.enabled).
+    // Hides the page's Picture-in-picture setting: the app has none (see the README). The button below stays unused until it does.
     pip: false,
     device: __DEVICE__,
     deviceId: __DEVICE_ID__,

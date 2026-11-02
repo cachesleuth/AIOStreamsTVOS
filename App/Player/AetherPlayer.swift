@@ -1,0 +1,774 @@
+import AetherHost
+import AVFoundation
+import Combine
+import UIKit
+
+/// What the player reports, always on the main thread, in the page's `player-*` terms.
+@MainActor
+protocol PlayerListener: AnyObject {
+    /// Only the fields that changed, in the page's `player-state` terms.
+    func playerState(_ state: Message)
+    func playerTracks(_ tracks: [Message])
+    func playerChapters(_ chapters: [Message])
+    /// `start`, `loaded` or `restart`, as mpv's events.
+    func playerEvent(_ name: String)
+    func playerEnded(reason: String, error: String?, cause: String?, status: Int?)
+}
+
+/**
+ * AetherEngine playing the page's videos. FFmpeg reads the file, and
+ * VideoToolbox and AVPlayer play it, so tvOS does what it does for its own
+ * apps: Match Content's HDR10, HLG and Dolby Vision modes, and Dolby Atmos.
+ *
+ * Atmos, which is what this is set up around:
+ * - E-AC-3 with Atmos (JOC), the streaming services' Atmos, is copied into
+ *   the stream AVPlayer plays untouched, and tvOS sends it to the receiver as
+ *   Dolby MAT. That needs the HDMI route at full width, so the audio session
+ *   is activated per video (`AudioOutput`).
+ * - TrueHD and DTS-HD can't be bitstreamed by an Apple TV, so they're decoded
+ *   to multichannel PCM, up to 7.1, as Infuse does. TrueHD Atmos and DTS:X
+ *   play as their 7.1, without objects or heights.
+ * - Anything that shapes the sound (stereo, 5.1) decodes it, which drops the
+ *   objects; so does a TV whose ARC takes only stereo.
+ *
+ * The rest follows what mpv reported, so `PlayerChannel` and the page are unchanged.
+ */
+@MainActor
+final class AetherPlayer {
+    let engine: AetherEngine
+    private let view: AetherPlayerView
+    private let subtitles: SubtitleOverlay
+    weak var listener: PlayerListener?
+
+    private var watching = Set<AnyCancellable>()
+    private var loading: Task<Void, Never>?
+    private var generation = 0
+
+    /// The file loaded or loading, and the one to play after it.
+    private(set) var current: LoadRequest?
+    private var queued: LoadRequest?
+    /// Its end has been reported, so the state the engine reports after it is the next file's.
+    private var ended = true
+
+    private var settings = PlayerSettings()
+    private var paused = false
+    private var volume = 1.0
+    private var muted = false
+    private var speed = 1.0
+    /// Server and user subtitles added to the file, by track id, as the page named them.
+    private var addedSubtitles: [Int: String] = [:]
+    private var leftWithFile = false
+    private var lastBuffered: Double?
+
+    init(view: AetherPlayerView, subtitles: SubtitleOverlay) throws {
+        EngineLogBook.install()
+        engine = try AetherEngine()
+        self.view = view
+        self.subtitles = subtitles
+        // The page's controls are the transport, so the app owns Now Playing (`NowPlaying`).
+        engine.ownsVideoNowPlayingSession = true
+        engine.ownsSoftwareNowPlaying = true
+        // The app plays no other sound, so the session goes when playback does; otherwise a
+        // receiver can keep repeating the last Atmos frame after the player is gone.
+        engine.deactivatesAudioSessionOnStop = true
+        engine.bind(view: view)
+        subtitles.videoRect = { [weak self] in self?.videoRect() ?? .zero }
+        watch()
+        let lifecycle = NotificationCenter.default
+        observers = [
+            lifecycle.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.enteredBackground() }
+            },
+            lifecycle.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.becameActive() }
+            },
+        ]
+    }
+
+    private var observers: [NSObjectProtocol] = []
+
+    static var version: String { AetherEngine.version }
+
+    // MARK: Requests
+
+    func load(_ request: LoadRequest) {
+        // mpv's `append`: after the file playing, which the page only asks of a player in its own window.
+        if request.append, current != nil, !ended {
+            queued = request
+            return
+        }
+        start(request)
+    }
+
+    private func start(_ request: LoadRequest) {
+        guard let url = URL(string: request.url) else { return }
+        if current != nil, !ended { listener?.playerEnded(reason: "stop", error: nil, cause: nil, status: nil) }
+        generation += 1
+        let generation = generation
+        current = request
+        queued = nil
+        ended = false
+        addedSubtitles = [:]
+        lastBuffered = nil
+        subtitles.reset()
+        listener?.playerEvent("start")
+        listener?.playerState(["idle": false, "buffering": true, "positionMs": request.startMs])
+        loading?.cancel()
+        loading = Task { [weak self] in
+            await withCheckedContinuation { done in AudioOutput.activate { done.resume() } }
+            guard let self, generation == self.generation else { return }
+            do {
+                try await self.engine.load(
+                    url: url,
+                    startPosition: request.startMs > 0 ? request.startMs / 1000 : nil,
+                    options: self.options(for: request)
+                )
+                guard generation == self.generation else { return }
+                self.loaded(request)
+            } catch is CancellationError {
+                // Another load took its place.
+            } catch {
+                guard generation == self.generation else { return }
+                self.failed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// How the file plays: mostly the page's sound settings, read for Atmos (see the type's notes).
+    private func options(for request: LoadRequest) -> LoadOptions {
+        var options = LoadOptions()
+        options.httpHeaders = request.headers
+        options.autoplay = !paused
+        options.preferredAudioLanguages = request.audioLanguages
+        // Matching tracks are confirmed as Atmos in the background, for the track names and the statistics.
+        options.confirmAtmos = true
+        if let manager = view.window?.avDisplayManager {
+            options.matchContentEnabled = manager.isDisplayCriteriaMatchingEnabled
+        }
+        // TrueHD, DTS and DTS-HD can't leave an Apple TV as a bitstream, so they're decoded and reach
+        // the receiver as multichannel PCM, up to 7.1, as Infuse plays them: TrueHD Atmos and DTS:X
+        // as their 7.1, without the objects and heights (`objectAudioRendering` stays off). A TV's
+        // plain ARC takes only stereo PCM, so a soundbar behind one gets stereo; `.surroundCompat`
+        // would give it Dolby Digital Plus 5.1 instead, lossy. E-AC-3 and AC-3 are copied either way.
+        options.audioBridgeMode = .lossless
+        options.audioShaping = shaping
+        options.audioDelaySeconds = settings.audioDelayMs / 1000
+        if !settings.hardwareDecoding { options.preferredDecodePath = .software }
+        return options
+    }
+
+    /// The page's channel limit. Shaping needs the decoded sound, so it costs Atmos; 7.1 and Automatic shape nothing.
+    private var shaping: AudioShaping {
+        switch settings.audioChannels {
+        case "stereo": return AudioShaping(maxChannels: 2)
+        case "5.1": return AudioShaping(maxChannels: 6)
+        default: return AudioShaping()
+        }
+    }
+
+    private func loaded(_ request: LoadRequest) {
+        if paused { engine.pause() }
+        if speed != 1 { engine.setRate(Float(speed)) }
+        applyVolume()
+        pickSubtitle(request)
+        reportTracks()
+        reportChapters()
+        if engine.duration > 0 { listener?.playerState(["durationMs": engine.duration * 1000]) }
+        listener?.playerEvent("loaded")
+    }
+
+    private func failed(_ error: String) {
+        guard !ended else { return }
+        ended = true
+        let info = engine.errorInfo
+        var status: Int?
+        if let code = info?.underlyingCode, (400..<600).contains(code),
+           info?.kind == .sourceRefused || info?.kind == .sourceRateLimited || info?.kind == .sourceOpenFailed {
+            status = code
+        }
+        NSLog("[player] failed: %@ (%@)", error, info.map { "\($0.kind.rawValue)" } ?? "no kind")
+        listener?.playerEnded(reason: "error", error: error, cause: info?.message, status: status)
+        listener?.playerState(["idle": true, "buffering": false])
+    }
+
+    func stop() {
+        generation += 1
+        loading?.cancel()
+        loading = nil
+        queued = nil
+        let wasPlaying = current != nil && !ended
+        current = nil
+        ended = true
+        engine.stop()
+        subtitles.reset()
+        if wasPlaying { listener?.playerEnded(reason: "stop", error: nil, cause: nil, status: nil) }
+        listener?.playerState(["idle": true, "buffering": false, "seeking": false])
+    }
+
+    func change(_ change: Change) {
+        if let paused = change.paused {
+            self.paused = paused
+            if current != nil {
+                if paused { engine.pause() } else { engine.play() }
+            }
+            listener?.playerState(["paused": paused])
+        }
+        if let volume = change.volume { self.volume = volume }
+        if let muted = change.muted { self.muted = muted }
+        if change.volume != nil || change.muted != nil {
+            applyVolume()
+            listener?.playerState(["volume": self.volume, "muted": self.muted])
+        }
+        if let speed = change.speed {
+            self.speed = speed
+            engine.setRate(Float(speed))
+            listener?.playerState(["speed": Double(min(Float(speed), engine.maxSupportedRate))])
+        }
+        if case .track(let id)? = change.audio, let index = Int(id) {
+            engine.selectAudioTrack(index: index)
+        }
+        if let subtitle = change.subtitle {
+            switch subtitle {
+            case .track(let id): if let index = Int(id) { engine.selectSubtitleTrack(index: index) }
+            case .off: engine.clearSubtitle()
+            }
+        }
+        if let delay = change.subtitleDelayMs { subtitles.delay = delay / 1000 }
+    }
+
+    func seek(_ positionMs: Double) {
+        guard current != nil else { return }
+        let seconds = max(0, positionMs / 1000)
+        Task { [weak self] in await self?.engine.seek(to: seconds) }
+    }
+
+    /// From the server, or a file the user added, shown in place of track `replace`.
+    func addSubtitle(_ url: URL, title: String?, language: String?, replace: Int?, pageURL: String?) {
+        guard current != nil else { return }
+        if let replace, replace >= AetherEngine.externalSubtitleTrackIDBase {
+            engine.removeExternalSubtitleTrack(id: replace)
+            addedSubtitles[replace] = nil
+        }
+        let format = ["srt", "ass", "ssa", "vtt", "sup"].first { url.pathExtension.lowercased() == $0 }
+        let track = engine.addExternalSubtitleTrack(ExternalSubtitleTrack(
+            url: url,
+            name: title.flatMap { $0.isEmpty ? nil : $0 },
+            language: language.flatMap { $0.isEmpty ? nil : $0 },
+            formatHint: format
+        ))
+        if let pageURL { addedSubtitles[track.id] = pageURL }
+        engine.selectSubtitleTrack(index: track.id)
+        reportTracks()
+    }
+
+    func setStyle(_ style: Style) {
+        switch style.fit {
+        case .fit: engine.videoGravity = .resizeAspect
+        case .crop: engine.videoGravity = .resizeAspectFill
+        case .stretch: engine.videoGravity = .resize
+        }
+        subtitles.setStyle(style)
+    }
+
+    func setSettings(_ next: PlayerSettings) {
+        let old = settings
+        settings = next
+        guard current != nil, !ended else { return }
+        // The rest is read at the next load.
+        if next.audioDelayMs != old.audioDelayMs { engine.setAudioDelay(next.audioDelayMs / 1000) }
+        if next.audioChannels != old.audioChannels { engine.setAudioShaping(shaping) }
+    }
+
+    private func applyVolume() {
+        engine.volume = muted ? 0 : Float(min(1, max(0, volume)))
+    }
+
+    // MARK: Subtitle choice
+
+    /**
+     * The page's subtitle mode, as mpv's options for it pick: `default` the
+     * first preferred language, else the file's default track, else forced
+     * ones in the audio's language; `always` falls back to any track; `smart`
+     * shows only forced ones when the audio is already in a preferred language;
+     * `forced` only forced ones; `none` none.
+     */
+    private func pickSubtitle(_ request: LoadRequest) {
+        let tracks = engine.subtitleTracks.filter { !$0.isExternal }
+        let audioLanguage = engine.audioTracks.first { $0.id == engine.activeAudioTrackIndex }?.language
+        let wanted = request.subtitleLanguages
+        func speaks(_ track: TrackInfo, _ code: String?) -> Bool {
+            guard let code, let language = track.language else { return false }
+            return Self.sameLanguage(language, code)
+        }
+        func preferred() -> TrackInfo? {
+            for code in wanted {
+                if let track = tracks.first(where: { speaks($0, code) && !$0.isForced }) ?? tracks.first(where: { speaks($0, code) }) {
+                    return track
+                }
+            }
+            return nil
+        }
+        let forced = tracks.first { $0.isForced && speaks($0, audioLanguage) } ?? tracks.first { $0.isForced && $0.language == nil }
+        var pick: TrackInfo?
+        switch request.subtitleMode {
+        case .none:
+            pick = nil
+        case .forced:
+            pick = forced ?? tracks.first { $0.isForced }
+        case .always:
+            pick = preferred() ?? tracks.first { $0.isDefault } ?? tracks.first
+        case .smart:
+            let audioWanted = wanted.contains { code in audioLanguage.map { Self.sameLanguage($0, code) } ?? false }
+            pick = audioWanted ? forced : preferred() ?? forced
+        case .default:
+            pick = preferred() ?? tracks.first { $0.isDefault && !$0.isForced } ?? forced
+        }
+        if let pick {
+            if engine.activeSubtitleTrackIndex != pick.id { engine.selectSubtitleTrack(index: pick.id) }
+        } else if engine.activeSubtitleTrackIndex != nil {
+            engine.clearSubtitle()
+        }
+    }
+
+    /// `en` and `eng`, or `pt` and `pt-BR`, as mpv matches them.
+    static func sameLanguage(_ a: String, _ b: String) -> Bool {
+        let a = a.lowercased(), b = b.lowercased()
+        if a == b { return true }
+        let baseA = a.split(separator: "-").first.map(String.init) ?? a
+        let baseB = b.split(separator: "-").first.map(String.init) ?? b
+        if baseA == baseB { return true }
+        let short = baseA.count < baseB.count ? baseA : baseB
+        let long = baseA.count < baseB.count ? baseB : baseA
+        return short.count == 2 && long.count == 3 && (Self.twoToThree[short] ?? []).contains(long)
+    }
+
+    /// The ISO 639-1 codes whose ISO 639-2 forms don't start with them, and the common ones that do.
+    private static let twoToThree: [String: Set<String>] = [
+        "en": ["eng"], "es": ["spa"], "fr": ["fre", "fra"], "de": ["ger", "deu"], "it": ["ita"],
+        "pt": ["por"], "nl": ["dut", "nld"], "sv": ["swe"], "no": ["nor", "nob", "nno"], "da": ["dan"],
+        "fi": ["fin"], "pl": ["pol"], "cs": ["cze", "ces"], "sk": ["slo", "slk"], "hu": ["hun"],
+        "ro": ["rum", "ron"], "el": ["gre", "ell"], "tr": ["tur"], "ru": ["rus"], "uk": ["ukr"],
+        "ja": ["jpn"], "ko": ["kor"], "zh": ["chi", "zho"], "ar": ["ara"], "he": ["heb"], "hi": ["hin"],
+        "th": ["tha"], "vi": ["vie"], "id": ["ind"], "ms": ["may", "msa"], "fa": ["per", "fas"],
+        "bg": ["bul"], "hr": ["hrv"], "sr": ["srp"], "sl": ["slv"], "et": ["est"], "lv": ["lav"],
+        "lt": ["lit"], "is": ["ice", "isl"], "ca": ["cat"], "eu": ["baq", "eus"], "gl": ["glg"],
+        "cy": ["wel", "cym"], "ga": ["gle"], "sq": ["alb", "sqi"], "mk": ["mac", "mkd"], "hy": ["arm", "hye"],
+        "ka": ["geo", "kat"], "ta": ["tam"], "te": ["tel"], "bn": ["ben"], "ur": ["urd"], "tl": ["tgl"], "fil": ["fil"],
+    ]
+
+    // MARK: Reports
+
+    private func watch() {
+        engine.$state
+            .sink { [weak self] state in self?.stateChanged(state) }
+            .store(in: &watching)
+        engine.$isBuffering
+            .removeDuplicates()
+            .sink { [weak self] buffering in
+                guard let self, self.current != nil, !self.ended else { return }
+                self.listener?.playerState(["buffering": buffering])
+            }
+            .store(in: &watching)
+        engine.$isSeeking
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] seeking in
+                guard let self, self.current != nil, !self.ended else { return }
+                self.listener?.playerState(["seeking": seeking])
+                // mpv's playback-restart: playing again after a seek.
+                if !seeking { self.listener?.playerEvent("restart") }
+            }
+            .store(in: &watching)
+        engine.$hasFirstFrameReadyForDisplay
+            .removeDuplicates()
+            .sink { [weak self] ready in
+                guard let self, ready, self.current != nil, !self.ended else { return }
+                self.listener?.playerState(["buffering": false])
+                self.listener?.playerEvent("restart")
+            }
+            .store(in: &watching)
+        engine.$duration
+            .removeDuplicates()
+            .sink { [weak self] duration in
+                guard let self, self.current != nil, !self.ended, duration > 0 else { return }
+                self.listener?.playerState(["durationMs": duration * 1000])
+            }
+            .store(in: &watching)
+        engine.clock.$currentTime
+            .sink { [weak self] seconds in self?.positionChanged(seconds) }
+            .store(in: &watching)
+        engine.clock.$sourceTime
+            .sink { [weak self] seconds in self?.subtitles.setTime(seconds) }
+            .store(in: &watching)
+        engine.$subtitleCues
+            .sink { [weak self] cues in self?.subtitles.setCues(cues) }
+            .store(in: &watching)
+        Publishers.CombineLatest(engine.$audioTracks, engine.$subtitleTracks)
+            .dropFirst()
+            .sink { [weak self] _, _ in
+                // The values arrive before the engine stores them; read them once it has.
+                DispatchQueue.main.async { self?.reportTracks() }
+            }
+            .store(in: &watching)
+        engine.$activeAudioTrackIndex
+            .removeDuplicates()
+            .sink { [weak self] index in
+                guard let self, self.current != nil else { return }
+                self.listener?.playerState(["audio": nullable(index.map(String.init))])
+                DispatchQueue.main.async { self.reportPassthrough() }
+            }
+            .store(in: &watching)
+        engine.$activeSubtitleTrackIndex
+            .removeDuplicates()
+            .sink { [weak self] index in
+                guard let self, self.current != nil else { return }
+                self.listener?.playerState(["subtitle": nullable(index.map(String.init))])
+            }
+            .store(in: &watching)
+        engine.$audioDelivery
+            .removeDuplicates()
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.reportPassthrough() } }
+            .store(in: &watching)
+        engine.$mediaChapters
+            .dropFirst()
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.reportChapters() } }
+            .store(in: &watching)
+        // The picture's rectangle moves with the route and the video's size.
+        Publishers.Merge3(
+            engine.$videoRoute.map { _ in () },
+            engine.$softwareDisplaySize.map { _ in () },
+            engine.$hasFirstFrameReadyForDisplay.map { _ in () }
+        )
+        .sink { [weak self] in DispatchQueue.main.async { self?.subtitles.setNeedsLayout() } }
+        .store(in: &watching)
+    }
+
+    private func stateChanged(_ state: PlaybackState) {
+        guard current != nil, !ended else { return }
+        switch state {
+        case .playing:
+            listener?.playerState(["paused": false])
+        case .paused:
+            listener?.playerState(["paused": true])
+        case .ended:
+            ended = true
+            listener?.playerEnded(reason: "eof", error: nil, cause: nil, status: nil)
+            if let next = queued {
+                start(next)
+            } else {
+                listener?.playerState(["idle": true])
+            }
+        case .error(let message):
+            failed(message)
+        case .idle, .loading, .seeking:
+            break
+        }
+    }
+
+    private func positionChanged(_ seconds: Double) {
+        guard current != nil, !ended, engine.state != .loading else { return }
+        var state: Message = ["positionMs": seconds * 1000]
+        let ahead = engine.clock.bufferedPosition
+        if ahead != lastBuffered {
+            lastBuffered = ahead
+            state["buffered"] = ahead > seconds ? [["startMs": seconds * 1000, "endMs": ahead * 1000]] : []
+        }
+        listener?.playerState(state)
+    }
+
+    private func reportTracks() {
+        guard current != nil else { return }
+        let tracks = engine.audioTracks.map { track($0, type: "audio") }
+            + engine.subtitleTracks.map { track($0, type: "subtitle") }
+        listener?.playerTracks(tracks)
+    }
+
+    private func track(_ track: TrackInfo, type: String) -> Message {
+        var entry: Message = [
+            "id": String(track.id),
+            "type": type,
+            "default": track.isDefault,
+            "forced": track.isForced,
+            "hearingImpaired": track.isHearingImpaired,
+            "visualImpaired": track.isVisualImpaired,
+            "external": track.isExternal,
+        ]
+        var title = track.name.trimmingCharacters(in: .whitespaces)
+        if type == "audio" {
+            // So the track list says which one carries Atmos, as the file's own names often don't.
+            let profile = track.profile ?? ""
+            let atmos = track.isAtmos || profile.localizedCaseInsensitiveContains("atmos")
+            let dtsx = track.isDTSX || profile.localizedCaseInsensitiveContains("DTS:X")
+            if atmos, !title.localizedCaseInsensitiveContains("atmos") {
+                title = title.isEmpty ? "Dolby Atmos" : "\(title) · Dolby Atmos"
+            } else if dtsx, !title.localizedCaseInsensitiveContains("DTS:X") {
+                title = title.isEmpty ? "DTS:X" : "\(title) · DTS:X"
+            }
+        }
+        if !title.isEmpty { entry["title"] = title }
+        if let language = track.language, !language.isEmpty { entry["language"] = language }
+        if !track.codec.isEmpty { entry["codec"] = track.codec }
+        if let url = addedSubtitles[track.id] { entry["url"] = url }
+        return entry
+    }
+
+    private func reportChapters() {
+        guard current != nil else { return }
+        let chapters: [Message] = engine.mediaChapters.map { chapter in
+            var entry: Message = ["startMs": chapter.startSeconds * 1000]
+            if !chapter.name.isEmpty { entry["title"] = chapter.name }
+            return entry
+        }
+        listener?.playerChapters(chapters)
+    }
+
+    /// The audio track playing, if any.
+    var activeAudio: TrackInfo? {
+        engine.audioTracks.first { $0.id == engine.activeAudioTrackIndex }
+    }
+
+    /// The receiver gets the Dolby bitstream itself: what the page shows as passthrough.
+    var bitstreaming: Bool {
+        engine.audioDelivery == .streamCopy && ["ac3", "eac3"].contains(activeAudio?.codec ?? "")
+    }
+
+    private func reportPassthrough() {
+        guard current != nil, !ended else { return }
+        listener?.playerState(["passthrough": bitstreaming])
+    }
+
+    // MARK: The picture
+
+    /// Where the picture is drawn, in the video view's coordinates, which the overlay shares.
+    private func videoRect() -> CGRect {
+        let bounds = view.bounds
+        if engine.videoRoute != .software, let layer = engine.nativePlayerLayer {
+            let rect = layer.videoRect
+            if rect.width > 0, rect.height > 0 { return rect }
+        }
+        var size = engine.softwareDisplaySize ?? .zero
+        if size.width <= 0 || size.height <= 0 {
+            size = CGSize(width: Double(engine.sourceVideoWidth) * engine.sourceVideoPixelAspectRatio,
+                          height: Double(engine.sourceVideoHeight))
+        }
+        guard size.width > 0, size.height > 0, bounds.width > 0, bounds.height > 0 else { return bounds }
+        switch engine.videoGravity {
+        case .resize:
+            return bounds
+        case .resizeAspectFill:
+            let scale = max(bounds.width / size.width, bounds.height / size.height)
+            let fitted = CGSize(width: size.width * scale, height: size.height * scale)
+            return CGRect(x: bounds.midX - fitted.width / 2, y: bounds.midY - fitted.height / 2, width: fitted.width, height: fitted.height)
+        default:
+            let scale = min(bounds.width / size.width, bounds.height / size.height)
+            let fitted = CGSize(width: size.width * scale, height: size.height * scale)
+            return CGRect(x: bounds.midX - fitted.width / 2, y: bounds.midY - fitted.height / 2, width: fitted.width, height: fitted.height)
+        }
+    }
+
+    // MARK: Background
+
+    /**
+     * tvOS gives the decoder back when the app leaves the screen, so the
+     * engine lets the video go then (it would otherwise wedge tvOS's media
+     * server across a long suspension), and it's opened again here, paused
+     * where it was, as the app paused it on leaving.
+     */
+    private func enteredBackground() {
+        leftWithFile = current != nil && !ended
+    }
+
+    private func becameActive() {
+        guard leftWithFile else { return }
+        leftWithFile = false
+        guard current != nil, !ended else { return }
+        let generation = generation
+        Task { [weak self] in
+            await withCheckedContinuation { done in AudioOutput.activate { done.resume() } }
+            guard let self, generation == self.generation else { return }
+            do {
+                // It keeps the options and the transport, so a paused video comes back paused.
+                try await self.engine.reloadAtCurrentPosition()
+                guard generation == self.generation else { return }
+                if self.paused { self.engine.pause() } else { self.engine.play() }
+            } catch is CancellationError {
+            } catch {
+                guard generation == self.generation else { return }
+                self.failed(error.localizedDescription)
+            }
+        }
+    }
+
+    // MARK: Statistics
+
+    /**
+     * The numbers the page's statistics show, in the shape the Android app's
+     * ExoPlayer sends them: the page then writes the readout, Atmos
+     * passthrough included. `cpuMs` and `atMs` give it the app's CPU use.
+     */
+    func stats() -> Message {
+        var stats: Message = [:]
+        if let codec = engine.sourceVideoCodecName {
+            stats["videoMime"] = Self.videoMimes[codec] ?? "video/\(codec)"
+            stats["width"] = Int(engine.sourceVideoWidth)
+            stats["height"] = Int(engine.sourceVideoHeight)
+            if let fps = engine.sourceVideoFrameRate { stats["frameRate"] = fps }
+            if engine.sourceVideoBitrate > 0 { stats["videoBitrate"] = engine.sourceVideoBitrate }
+            switch engine.sourceVideoFormat {
+            case .hdr10, .hdr10Plus, .dolbyVision:
+                stats["colorTransfer"] = 6
+                stats["colorSpace"] = 6
+            case .hlg:
+                stats["colorTransfer"] = 7
+                stats["colorSpace"] = 6
+            case .sdr:
+                break
+            }
+            if let decoder = engine.activeVideoDecoder { stats["videoDecoder"] = decoder }
+            var route = "\(Self.routeName(engine.videoRoute)), \(Self.formatName(engine.videoFormat))"
+            if let profile = engine.sourceDVProfile { route = "Dolby Vision profile \(profile) as " + route }
+            stats["dolbyVisionRoute"] = route
+        }
+        stats["hdrTypes"] = Self.hdrType(engine.videoFormat).map { [$0] } ?? []
+        if let audio = activeAudio {
+            stats["audioMime"] = Self.audioMime(audio)
+            stats["channels"] = audio.channels
+            if audio.sampleRate > 0 { stats["sampleRate"] = audio.sampleRate }
+            if audio.bitrate > 0 { stats["audioBitrate"] = audio.bitrate }
+            let object = engine.liveTelemetry?.objectAudio
+            var decoder = engine.activeAudioDecoder ?? Self.deliveryName(engine.audioDelivery)
+            if let object {
+                decoder += " · \(object.layout.rawValue) bed, \(object.activeObjects) of \(object.objects) objects"
+                    + (object.heightChannels > 0 ? ", \(object.heightChannels) height channels" : "")
+            }
+            stats["audioDecoder"] = decoder
+            if bitstreaming {
+                stats["outputMime"] = Self.audioMime(audio)
+                stats["outputChannels"] = audio.channels
+            } else if let object {
+                stats["outputMime"] = "audio/raw"
+                stats["outputChannels"] = object.layout.speakers.count
+            } else if engine.audioDelivery == .decoded || (engine.audioDelivery == .bridged && engine.loadedAudioIsLossless) {
+                stats["outputMime"] = "audio/raw"
+                stats["outputChannels"] = AVAudioSession.sharedInstance().outputNumberOfChannels
+            }
+        }
+        if let telemetry = engine.liveTelemetry {
+            if let ahead = telemetry.forwardBufferSeconds { stats["bufferedMs"] = ahead * 1000 }
+            if let dropped = telemetry.droppedFrameCount { stats["droppedFrames"] = dropped }
+        }
+        return ["type": "player-stats", "stats": stats, "cpuMs": Self.cpuMs, "atMs": Date().timeIntervalSince1970 * 1000]
+    }
+
+    /// What the app menu and the diagnostics say about the video and its sound.
+    var report: [String] {
+        guard current != nil, !ended else {
+            return ["Player: AetherEngine \(Self.version), nothing playing", "Audio output: \(AudioOutput.routeSummary)"]
+        }
+        var lines = [
+            "Player: AetherEngine \(Self.version), \(Self.routeName(engine.videoRoute))",
+            "Video: \(engine.sourceVideoCodecName ?? "?") \(engine.sourceVideoWidth)×\(engine.sourceVideoHeight)"
+                + (engine.sourceVideoFrameRate.map { String(format: " %.3f fps", $0) } ?? "")
+                + ", \(Self.formatName(engine.sourceVideoFormat))"
+                + (engine.sourceDVProfile.map { " (profile \($0))" } ?? "")
+                + " → shown as \(Self.formatName(engine.videoFormat))",
+            "Video decoder: \(engine.activeVideoDecoder ?? "none")",
+        ]
+        if let audio = activeAudio {
+            lines.append("Audio track: \(audio.codec) \(audio.channels) ch"
+                + (audio.profile.map { ", \($0)" } ?? "")
+                + (audio.isAtmos ? ", Atmos (JOC) confirmed" : ""))
+        } else {
+            lines.append("Audio track: none")
+        }
+        lines.append("Audio delivery: \(Self.deliveryName(engine.audioDelivery)); \(engine.activeAudioDecoder ?? "no decoder")")
+        if let object = engine.liveTelemetry?.objectAudio {
+            lines.append("Object audio: \(object.layout.rawValue) bed, \(object.activeObjects) of \(object.objects) objects active, "
+                + "\(object.elevatedObjects) overhead, \(object.heightChannels) height channels")
+        }
+        lines.append("Audio shaping: \(engine.audioShapingState.rawValue)")
+        lines.append("Audio output: \(AudioOutput.routeSummary)")
+        if !AudioOutput.routeIsHDMI { lines.append("Atmos needs the HDMI output; this route can't carry Dolby MAT") }
+        return lines
+    }
+
+    private static let videoMimes = [
+        "hevc": "video/hevc", "h264": "video/avc", "av1": "video/av01", "vp9": "video/x-vnd.on2.vp9",
+        "vp8": "video/x-vnd.on2.vp8", "mpeg2video": "video/mpeg2", "vc1": "video/wvc1",
+    ]
+
+    /// The mode the TV shows the video in, as Android's display HDR types, which the page names.
+    private static func hdrType(_ format: VideoFormat) -> Int? {
+        switch format {
+        case .dolbyVision: return 1
+        case .hdr10: return 2
+        case .hlg: return 3
+        case .hdr10Plus: return 4
+        case .sdr: return nil
+        }
+    }
+
+    private static func audioMime(_ track: TrackInfo) -> String {
+        let profile = track.profile ?? ""
+        switch track.codec {
+        case "eac3": return track.isAtmos ? "audio/eac3-joc" : "audio/eac3"
+        case "ac3": return "audio/ac3"
+        case "truehd", "mlp": return "audio/true-hd"
+        case "dts":
+            if track.isDTSX || profile.contains("DTS:X") { return "audio/vnd.dts.uhd;profile=p2" }
+            return profile.contains("HD") ? "audio/vnd.dts.hd" : "audio/vnd.dts"
+        case "aac": return "audio/mp4a-latm"
+        case "flac": return "audio/flac"
+        case "opus": return "audio/opus"
+        case "ac4": return "audio/ac4"
+        default: return track.codec.hasPrefix("pcm") ? "audio/raw" : "audio/\(track.codec)"
+        }
+    }
+
+    static func routeName(_ route: VideoRoute) -> String {
+        switch route {
+        case .remoteBypass: return "AVPlayer on the stream's own HLS"
+        case .loopback: return "AVPlayer (FFmpeg remux)"
+        case .software: return "software decode"
+        case .audio: return "audio only"
+        case .none: return "no route"
+        }
+    }
+
+    static func formatName(_ format: VideoFormat) -> String {
+        switch format {
+        case .sdr: return "SDR"
+        case .hdr10: return "HDR10"
+        case .hdr10Plus: return "HDR10+"
+        case .dolbyVision: return "Dolby Vision"
+        case .hlg: return "HLG"
+        }
+    }
+
+    static func deliveryName(_ delivery: AudioDelivery) -> String {
+        switch delivery {
+        case .streamCopy: return "bitstream, copied untouched"
+        case .bridged: return "re-encoded by the audio bridge"
+        case .decoded: return "decoded to PCM"
+        case .playerManaged: return "AVPlayer's own"
+        case .noAudioInSource: return "the file has no sound"
+        case .droppedNoPipeline: return "dropped: no way to play this track"
+        case .none: return "none"
+        }
+    }
+
+    /// The app's CPU time, user and system.
+    private static var cpuMs: Double {
+        var usage = rusage()
+        guard getrusage(RUSAGE_SELF, &usage) == 0 else { return 0 }
+        func ms(_ time: timeval) -> Double { Double(time.tv_sec) * 1000 + Double(time.tv_usec) / 1000 }
+        return ms(usage.ru_utime) + ms(usage.ru_stime)
+    }
+}
+
+private extension AetherEngine {
+    /// The audio bridge was asked for FLAC, which reaches the receiver as PCM.
+    var loadedAudioIsLossless: Bool {
+        activeAudioDecoder?.localizedCaseInsensitiveContains("flac") == true
+    }
+}

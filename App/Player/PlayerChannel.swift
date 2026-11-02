@@ -1,16 +1,18 @@
 import UIKit
 
 /**
- * Carries the page's `player-*` and `now-playing` messages to mpv, and mpv's
- * reports back, as AIOStreams' Android PlayerChannel does. All on the main thread.
+ * Carries the page's `player-*` and `now-playing` messages to the player, and
+ * the player's reports back, as AIOStreams' Android PlayerChannel does. All on
+ * the main thread.
  */
-final class PlayerChannel: MPVEngineListener {
-    private let engine: MPVEngine
+@MainActor
+final class PlayerChannel: PlayerListener {
+    private let player: AetherPlayer
     private let send: (Message) -> Void
     private let showVideo: (Bool) -> Void
     private let subtitlesDir: URL
     let nowPlaying: NowPlaying
-    /// Seek-bar thumbnails, made by a second mpv apart from the one playing.
+    /// Seek-bar thumbnails, from a decoder apart from the one playing.
     private let thumbnails: Thumbnails
 
     private var state: Message = [:]
@@ -21,44 +23,21 @@ final class PlayerChannel: MPVEngineListener {
     private var loaded = false
     private var nextSubtitle = 0
 
-    init(engine: MPVEngine, subtitlesDir: URL, send: @escaping (Message) -> Void, showVideo: @escaping (Bool) -> Void) {
-        self.engine = engine
+    init(player: AetherPlayer, subtitlesDir: URL, send: @escaping (Message) -> Void, showVideo: @escaping (Bool) -> Void) {
+        self.player = player
         self.subtitlesDir = subtitlesDir
         self.send = send
         self.showVideo = showVideo
-        nowPlaying = NowPlaying(send: send)
-        thumbnails = Thumbnails(send: send)
-        engine.listener = self
-    }
-
-    var paused: Bool { state.flag("paused") != false }
-
-    /// The file's length, 0 until known or for a live stream.
-    var durationMs: Double { state.number("durationMs") ?? 0 }
-
-    /// The page's Picture-in-picture setting, from the item playing.
-    private(set) var pictureInPictureAllowed = false
-
-    /// The page closed the player, so a picture-in-picture window has nothing left to show.
-    var onStopped: () -> Void = {}
-
-    /// Paused, resumed or a new length, for the picture-in-picture window's controls.
-    var onPlaybackChanged: () -> Void = {}
-
-    var positionMs: Double { state.number("positionMs") ?? 0 }
-    var speed: Double { state.number("speed") ?? 1 }
-
-    /// From the picture-in-picture window, which the page can't see while it shows.
-    func skip(byMs offset: Double) {
-        let to = max(0, (state.number("positionMs") ?? 0) + offset)
-        engine.seek(durationMs > 0 ? min(durationMs, to) : to)
+        nowPlaying = NowPlaying(engine: player.engine, send: send)
+        thumbnails = Thumbnails(engine: player.engine, send: send)
+        player.listener = self
     }
 
     /// A file is loaded, playing or paused.
     var playing: Bool { loaded }
 
     func change(_ change: Change) {
-        engine.change(change)
+        player.change(change)
     }
 
     /// False for a message that isn't the player's.
@@ -69,46 +48,45 @@ final class PlayerChannel: MPVEngineListener {
                 let request = try PlayerProtocol.load(message)
                 loaded = true
                 showVideo(true)
-                engine.load(request)
+                player.load(request)
             case "player-stop":
                 loaded = false
-                onStatsPage(nil)
-                engine.stop()
+                player.stop()
                 thumbnails.close()
-                onStopped()
                 updateIdleTimer()
-                endVideo()
             case "player-set":
-                engine.change(try PlayerProtocol.change(message))
+                player.change(try PlayerProtocol.change(message))
             case "player-seek":
-                if let at = message.number("positionMs") { engine.seek(at) }
+                if let at = message.number("positionMs") { player.seek(at) }
             case "player-subtitle-add":
                 let url = message.text("url") ?? ""
-                guard PlayerProtocol.isWebURL(url) else { throw ProtocolError("only http(s) subtitles load") }
-                engine.addSubtitle(
-                    url,
+                guard PlayerProtocol.isWebURL(url), let address = URL(string: url) else {
+                    throw ProtocolError("only http(s) subtitles load")
+                }
+                player.addSubtitle(
+                    address,
                     title: message.text("title"),
                     language: message.text("language"),
-                    replace: message.number("replace").map { Int($0) }
+                    replace: message.number("replace").map { Int($0) },
+                    pageURL: url
                 )
             case "player-style":
-                engine.setStyle(try PlayerProtocol.style(message))
+                player.setStyle(try PlayerProtocol.style(message))
             case "player-settings":
-                engine.setSettings(PlayerProtocol.settings(message))
+                player.setSettings(PlayerProtocol.settings(message))
             case "player-sync":
                 send(stateMessage(state))
                 send(["type": "player-tracks", "tracks": tracks])
                 send(["type": "player-chapters", "chapters": chapters])
+            case "player-stats":
+                // The page writes the readout from these, as it does for the Android app's ExoPlayer.
+                send(player.stats())
             case "subtitle-file":
                 try addSubtitleFile(message)
             case "now-playing":
                 let item = message.object("item")
                 nowPlaying.setItem(item)
-                pictureInPictureAllowed = item?.flag("pip") == true
-                if item == nil {
-                    showVideo(false)
-                    endVideo()
-                }
+                if item == nil { showVideo(false) }
             case "player-thumbnail":
                 let url = message.text("url") ?? ""
                 guard PlayerProtocol.isWebURL(url) else { throw ProtocolError("only http(s) files have thumbnails") }
@@ -121,10 +99,7 @@ final class PlayerChannel: MPVEngineListener {
             // No subtitle index here: the page goes without it.
             case "player-subtitle-index":
                 send(["type": "player-subtitle-index", "tracks": NSNull()])
-            case "player-stats-overlay":
-                // mpv's overlay is a Lua script, which tvOS's libmpv lacks, so the app draws its own.
-                onStatsPage(message.text("page"))
-            case "player-subtitle-lines", "player-skips", "player-stats",
+            case "player-stats-overlay", "player-subtitle-lines", "player-skips",
                  "player-controls", "player-retry", "player-unqueue":
                 break
             default:
@@ -138,12 +113,10 @@ final class PlayerChannel: MPVEngineListener {
         return true
     }
 
-    // MARK: MPVEngineListener
+    // MARK: PlayerListener
 
-    func engineState(_ update: Message) {
+    func playerState(_ update: Message) {
         state.merge(update) { _, new in new }
-        nowPlaying.update(state)
-        if update["paused"] != nil || update["durationMs"] != nil { onPlaybackChanged() }
         updateIdleTimer()
         var rest = update
         let position = rest.removeValue(forKey: "positionMs")
@@ -164,63 +137,31 @@ final class PlayerChannel: MPVEngineListener {
         heldPosition = held
     }
 
-    func engineTracks(_ tracks: [Message]) {
+    func playerTracks(_ tracks: [Message]) {
         self.tracks = tracks
         send(["type": "player-tracks", "tracks": tracks])
     }
 
-    func engineChapters(_ chapters: [Message]) {
+    func playerChapters(_ chapters: [Message]) {
         self.chapters = chapters
         send(["type": "player-chapters", "chapters": chapters])
     }
 
-    func engineEvent(_ name: String) {
+    func playerEvent(_ name: String) {
         send(["type": "player-event", "name": name])
     }
 
-    /// The statistics page the page asks to show, or nil to hide them.
-    var onStatsPage: (String?) -> Void = { _ in }
-
-    /// The TV's picture mode follows the video; nil goes back to the TV's own.
-    var onVideoFormat: (VideoFormat?) -> Void = { _ in }
-    private var videoFormat: VideoFormat?
-
-    func engineVideo(_ format: VideoFormat) {
-        guard loaded else {
-            DisplayMode.lastReport = "video reported (\(format.primaries), \(format.gamma)) while nothing was loaded; not applied"
-            NSLog("[display] %@", DisplayMode.lastReport)
-            return
-        }
-        guard format != videoFormat else { return }
-        videoFormat = format
-        if format.needsDolbyVisionProcessing {
-            NSLog("[player] Dolby Vision profile 5 has no HDR10 base layer; its colours will be off")
-        }
-        onVideoFormat(format)
-    }
-
-    private func endVideo() {
-        guard videoFormat != nil else { return }
-        videoFormat = nil
-        onVideoFormat(nil)
-    }
-
-    func engineEnded(reason: String, error: String?, cause: String?) {
+    func playerEnded(reason: String, error: String?, cause: String?, status: Int?) {
         var message: Message = ["type": "player-ended", "reason": reason, "error": nullable(error)]
-        if let cause {
-            message["cause"] = cause
-            if let match = cause.range(of: "HTTP error (\\d{3})", options: .regularExpression),
-               let status = Int(cause[match].suffix(3)) {
-                message["status"] = status
-            }
-        }
+        if let cause { message["cause"] = cause }
+        if let status { message["status"] = status }
         send(message)
     }
 
     // MARK: Private
 
     private static let throttle: CFTimeInterval = 0.25
-    private static let subtitleTypes: Set<String> = ["srt", "vtt", "ass", "ssa", "sub", "sup"]
+    private static let subtitleTypes: Set<String> = ["srt", "vtt", "ass", "ssa", "sup"]
     private static let maxSubtitleBytes = 10 << 20
 
     private func sendPosition(_ position: Message) {
@@ -243,11 +184,11 @@ final class PlayerChannel: MPVEngineListener {
         }
     }
 
-    /// The page names no path for mpv to open, so the file is written here first.
+    /// The page names no path for the player to open, so the file is written here first.
     private func addSubtitleFile(_ message: Message) throws {
         guard let name = message.text("name") else { throw ProtocolError("subtitle file without a name") }
         let ext = (name as NSString).pathExtension.lowercased()
-        guard Self.subtitleTypes.contains(ext) else { throw ProtocolError("\(name) is not a subtitle file") }
+        guard Self.subtitleTypes.contains(ext) else { throw ProtocolError("\(name) is not a subtitle file the player reads") }
         guard let data = Data(base64Encoded: message.text("data") ?? "", options: .ignoreUnknownCharacters) else {
             throw ProtocolError("\(name) could not be read")
         }
@@ -256,7 +197,7 @@ final class PlayerChannel: MPVEngineListener {
         nextSubtitle += 1
         let file = subtitlesDir.appendingPathComponent("\(nextSubtitle).\(ext)")
         try data.write(to: file)
-        engine.addSubtitle(file.path, title: String(name.prefix(200)), language: nil, replace: nil)
+        player.addSubtitle(file, title: String(name.prefix(200)), language: nil, replace: nil, pageURL: nil)
     }
 
     private func reject(_ message: String) {
