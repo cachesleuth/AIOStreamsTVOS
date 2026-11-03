@@ -82,16 +82,21 @@ For Atmos at all, set **Settings → Video and Audio → Audio Format** to **Aut
 Keep **Settings → Video and Audio → Audio Format → Continuous Audio Connection** on. With it off,
 on a Samsung TV with a Samsung HW-Q990F soundbar on eARC:
 
-- TrueHD and DTS-HD play as stereo. The session asks for 8 channels and gets them
+- Sound the Apple TV decodes plays as stereo: TrueHD and DTS-HD, and any track the page's Audio
+  channels, dialogue boost or night mode reshapes. The session asks for 8 channels and gets them
   (`preferred=8`), but tvOS keeps the HDMI output at 2 (`HDMIOutput[ch=2]`, `output=2`), so the
-  FLAC bridge's 8-channel PCM is downmixed. Infuse and Plex users report the same with Samsung TVs
-  and soundbars on eARC.
+  decoded PCM is downmixed. Infuse and Plex users report the same with Samsung TVs and soundbars
+  on eARC. E-AC-3 and AC-3 played as a stream copy are unaffected: they reach the soundbar still
+  encoded, E-AC-3 Atmos inside Dolby MAT on a 2-channel carrier, and the soundbar decodes every
+  channel itself (Dolby's 7.1.4 demo plays in full with the setting off).
 - Picture in picture closes on an HDR or frame-rate video: the window opens, the video goes back
   full screen, then the TV goes to the Home screen.
 
-With it on, both work: multichannel PCM in full and the window over the Home screen. The likely
-cause, unconfirmed, is that with it off tvOS sets the HDMI audio link up again at every change of
-sound format, and that the TV's eARC takes plain multichannel PCM only as stereo. `max=32` shows
+With it on, both work: multichannel PCM in full and the window over the Home screen. With it on,
+tvOS sends all sound inside Dolby MAT, decoded PCM included, which the TV passes over eARC intact;
+with it off, decoded sound goes out as plain PCM, which this TV's eARC takes only as stereo. The
+picture-in-picture failure is likely, but unconfirmed, tvOS setting the HDMI audio link up again
+at the change of sound format as the window opens. `max=32` shows
 in the route with the setting off too, so the route doesn't tell the two settings apart. The player's statistics show the track, its decoder and the
 output: `E-AC-3 Atmos passthrough` is Atmos on its way to the receiver. The app
 menu (hold Play/Pause) and the diagnostics add the audio route and the engine's recent audio log.
@@ -297,7 +302,10 @@ xcodegen generate               # writes AIOStreamsTV.xcodeproj from project.yml
 open AIOStreamsTV.xcodeproj     # Xcode fetches AetherEngine and its FFmpeg build through SwiftPM
 ```
 
-The engine is pinned to one version in `Packages/AetherHost/Package.swift`. Its FFmpeg comes as
+The engine is pinned to one commit in `Packages/AetherHost/Package.swift`: upstream 7.54.0 plus a
+fix on the app's fork ([mickey2266/AetherEngine](https://github.com/mickey2266/AetherEngine), branch
+`aiostreams`) that writes 7.1 FLAC in CoreMedia's channel order, so TrueHD and DTS-HD 7.1 play their
+side and rear surrounds from their own speakers. Its FFmpeg comes as
 dynamic frameworks that Xcode embeds in the app; nothing else in the app may bring an FFmpeg of its
 own, or it takes the engine's symbols.
 
@@ -316,7 +324,7 @@ Safari's Develop menu on a Mac can inspect the page.
 | `App/Support`  | Identity, folders, the mpv.conf note, the app menu, the app's own answers, the Top Shelf list |
 | `TopShelf`     | The Top Shelf extension: Continue Watching and Next Up                 |
 | `Shared`       | What the app and the extension both read: the saved list               |
-| `Packages`     | `AetherHost`: AetherEngine at a pinned version, for the app to link |
+| `Packages`     | `AetherHost`: AetherEngine at a pinned commit, for the app to link |
 | `scripts`      | Building the web app into `WebBuild` (git-ignored) |
 
 ## Licences
