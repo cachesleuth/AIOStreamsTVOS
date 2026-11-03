@@ -215,7 +215,10 @@ the bridge script adds the button to the page's controls, in the look of the pag
   Home screen its mode back when the window opens. Done there, in the background, that switch left
   the window's video paused for good, so the app switches first: it drops the engine's display
   criteria, waits for the TV to settle (the screen goes black for about 2 seconds, in the app),
-  plays the video again if the switch paused it, then opens the window. The criteria go back when
+  plays the video again if the switch paused it, waits until it plays (and half a second more),
+  then opens the window. Opened a hundredth of a second after the play, the window began to start
+  and tvOS never said it showed, so the app stayed in front instead of going to the Home screen;
+  if tvOS stays silent 2 seconds on and the window shows, the app goes anyway. The criteria go back when
   the video returns to the app. Only a video that switched the TV when it started does this (the
   app watches tvOS's mode-switch notifications); the rest open the window straight away.
 - Opening the app again, or the window's full-screen button, puts the video back in the app.

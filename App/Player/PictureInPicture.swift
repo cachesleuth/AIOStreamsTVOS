@@ -86,7 +86,7 @@ final class PictureInPicture: NSObject {
         guard player.engine.nativePlayerLayer != nil else {
             return failed("Picture-in-picture isn't available for this video.")
         }
-        guard !active, waiting == nil, !switchingMode else { return }
+        guard !active, waiting == nil, !switchingMode, !resuming else { return }
         pressedAt = CACurrentMediaTime()
         Self.trace = []
         // In steps: as one expression, the compiler can give up type-checking it.
@@ -279,6 +279,9 @@ final class PictureInPicture: NSObject {
             if resume, self.channel.playing, self.player.engine.state != .playing {
                 self.step("the switch paused the video; playing it again")
                 self.channel.change(Change(paused: false))
+                // Started a hundredth of a second after that, the window began ("window starting") and tvOS
+                // never said it showed, so the app never left for the Home screen. It waits for the video.
+                return self.whenPlaying(since: CACurrentMediaTime(), then: then)
             }
             then()
         }
@@ -303,6 +306,40 @@ final class PictureInPicture: NSObject {
 
     private var switchEnd: NSObjectProtocol?
 
+    /// The most `whenPlaying` waits for the video to play again, and how long it lets it play first.
+    private static let resumeTime: CFTimeInterval = 4
+    private static let resumeSettle: TimeInterval = 0.5
+
+    /// `whenPlaying` is waiting, so a second press doesn't start the window alongside it.
+    private var resuming = false
+
+    /// `then` once the video plays again, not waiting or buffering, and has for `resumeSettle`.
+    private func whenPlaying(since began: CFTimeInterval, then: @escaping () -> Void) {
+        resuming = true
+        let engine = player.engine
+        let elapsed: Double = CACurrentMediaTime() - began
+        if engine.state == .playing, !engine.isBuffering {
+            step(String(format: "the video plays again (%.2f s)", elapsed))
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.resumeSettle) { [weak self] in
+                MainActor.assumeIsolated { self?.resuming = false }
+                then()
+            }
+            return
+        }
+        guard elapsed < Self.resumeTime, channel.playing else {
+            step("the video isn't playing yet; going on")
+            resuming = false
+            return then()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            MainActor.assumeIsolated { self?.whenPlaying(since: began, then: then) }
+        }
+    }
+
+    /// How long after the window begins starting tvOS gets to say it shows, before the app checks itself.
+    private static let showTime: TimeInterval = 2
+    private var showWatch: DispatchWorkItem?
+
     /// Back to the video's own mode, once it's in the app again.
     private func putBackDisplayMode() {
         guard let criteria = heldCriteria else { return }
@@ -326,11 +363,26 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
             step("window starting")
             // The engine keeps the session through the background while the window shows.
             player.setPictureInPicture(true)
+            // tvOS didn't always say the window showed. If it shows anyway, the app leaves for the Home screen.
+            showWatch?.cancel()
+            let item = DispatchWorkItem { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.showWatch != nil else { return }
+                    self.showWatch = nil
+                    guard self.active else { return self.step("window not showing \(Int(Self.showTime)) s on") }
+                    self.step("window showing, tvOS didn't say so; to the Home screen")
+                    self.leaveApp()
+                }
+            }
+            showWatch = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.showTime, execute: item)
         }
     }
 
     nonisolated func pictureInPictureControllerDidStartPictureInPicture(_ controller: AVPictureInPictureController) {
         MainActor.assumeIsolated {
+            showWatch?.cancel()
+            showWatch = nil
             step("window showing")
             restoring = false
             send(["type": "pip", "value": true])
@@ -351,6 +403,8 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
     ) {
         let reason = error.localizedDescription
         MainActor.assumeIsolated {
+            showWatch?.cancel()
+            showWatch = nil
             step("didn't start: \(reason)")
             endWaiting()
             player.setPictureInPicture(false)
@@ -369,6 +423,8 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
 
     nonisolated func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
         MainActor.assumeIsolated {
+            showWatch?.cancel()
+            showWatch = nil
             player.setPictureInPicture(false)
             // Closing the window, rather than bringing it back full size, stops playback, as on Android.
             if !restoring { channel.change(Change(paused: true)) }
