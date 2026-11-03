@@ -329,11 +329,11 @@ xcodegen generate               # writes AIOStreamsTV.xcodeproj from project.yml
 open AIOStreamsTV.xcodeproj     # Xcode fetches AetherEngine and its FFmpeg build through SwiftPM
 ```
 
-The engine is pinned to upstream AetherEngine 7.56.0 in `Packages/AetherHost/Package.swift`. Lossless
-surround (TrueHD, DTS-HD) reaches AVPlayer as FLAC. The app's fork
-([mickey2266/AetherEngine](https://github.com/mickey2266/AetherEngine), branch `aiostreams`) has the
-changes tried before it: 7.1 FLAC in CoreMedia's channel order, for side and rear surrounds that played
-from each other's speakers, and lossless surround as labelled 24-bit PCM. Its FFmpeg comes as
+The engine is pinned to one commit in `Packages/AetherHost/Package.swift`: upstream AetherEngine 7.56.0
+plus one fix on the app's fork ([mickey2266/AetherEngine](https://github.com/mickey2266/AetherEngine),
+branch `aiostreams-7.56`). Lossless surround (TrueHD, DTS-HD) reaches AVPlayer as FLAC, and the fix
+writes 7.1 in CoreMedia's channel order, so the side and rear surrounds play from their own speakers
+instead of each other's. Its FFmpeg comes as
 dynamic frameworks that Xcode embeds in the app; nothing else in the app may bring an FFmpeg of its
 own, or it takes the engine's symbols.
 
