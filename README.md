@@ -89,6 +89,11 @@ picture falling behind. The menu's **Hold one source connection** reads the sour
 connection instead of ranged requests (AetherEngine's `heldSourceConnection`, HTTP/1.1 only),
 from the next video.
 
+The menu's **Play a test video…** plays an http(s) link you type (a file or an HLS playlist; the
+last one is remembered) in the app's player, without the page but with the page's player
+settings. Play/Pause or Select pauses, left and right skip 10 seconds, Back stops it, and the
+menu reports on it as on any video. It's offered only while the page has no video open.
+
 ### HDR
 
 - **HDR10, HDR10+ and HLG** reach the TV in their own mode. The engine asks tvOS for
@@ -170,7 +175,11 @@ the bridge script adds the button to the page's controls, in the look of the pag
   the video returns to the app. Only a video that switched the TV when it started does this (the
   app watches tvOS's mode-switch notifications); the rest open the window straight away.
 - Opening the app again, or the window's full-screen button, puts the video back in the app.
-  Closing the window pauses the video, as on Android.
+  Closing the window pauses the video, as on Android. Only a return from the background counts
+  as opening the app again: tvOS takes focus from the app and gives it back while the window
+  settles, and when it ignores the first Home screen ask (often just after a mode switch), and
+  taking that for a return put the video back full screen just as the app left for the Home
+  screen.
 - The app has the `audio` background mode, which tvOS needs to keep playing in the window, and the
   engine keeps its session through the background while the window shows.
 - Untested: the engine declares the long-form audio policy for HDMI, which blocks picture in
@@ -241,7 +250,7 @@ Back behaviour and the bundled-player path. It also means:
 | Click in a searchable list          | Such as Discover's catalog picker: after moving through it with Up or Down, picks the highlighted entry; straight away, opens the keyboard to search |
 | Back / Menu                         | The page's Back; twice on Home leaves the app     |
 | Play/Pause                          | Play/Pause                                        |
-| **Hold Play/Pause (1 s)**           | App menu: the app's diagnostics (move left onto them, then swipe or click up and down to scroll), reload, switch the source connection, or reset the app's data |
+| **Hold Play/Pause (1 s)**           | App menu: the app's diagnostics (move left onto them, then swipe or click up and down to scroll), play a test video from a link, reload, switch the source connection, or reset the app's data |
 
 ## Saved data
 
