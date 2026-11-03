@@ -1,7 +1,6 @@
 import AetherHost
 import AVFoundation
 import Foundation
-import UIKit
 
 /**
  * The audio session, set up for Dolby Atmos over HDMI.
@@ -35,22 +34,7 @@ enum AudioOutput {
         watchingRoute = true
         NotificationCenter.default.addObserver(
             forName: AVAudioSession.routeChangeNotification, object: nil, queue: nil
-        ) { note in
-            widen()
-            // A new output or a wake can set the HDMI link up again at stereo. Not the route changes
-            // a channel preference or the primer's own format change cause, or every video would prime.
-            let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
-            switch raw.flatMap(AVAudioSession.RouteChangeReason.init(rawValue:)) {
-            case .newDeviceAvailable, .oldDeviceUnavailable, .wakeFromSleep, .override, .noSuitableRouteForCategory:
-                linkMayHaveReset()
-            default:
-                break
-            }
-        }
-        // The Apple TV sleeping suspends the app, and the TV and soundbar usually sleep with it.
-        NotificationCenter.default.addObserver(
-            forName: UIApplication.willEnterForegroundNotification, object: nil, queue: nil
-        ) { _ in linkMayHaveReset() }
+        ) { _ in widen() }
     }
 
     private static let queue = DispatchQueue(label: "audio-session", qos: .userInitiated)
@@ -94,17 +78,18 @@ enum AudioOutput {
 
     // MARK: Dolby primer
 
-    /// Whether the primer has played since the Apple TV last went to sleep or the HDMI output last changed.
-    private static var primed = false
     private static var primer: AVQueuePlayer?
     private static var primerLooper: AVPlayerLooper?
     private static var primerWatch: NSKeyValueObservation?
+    /// Bumped by each start and stop, so a stop scheduled for an earlier video doesn't end a later one's.
+    private static var primerTurn = 0
+    private static var primerBefore = ""
+    private static var primerPlayed = false
     /// What the primer last did, for the app menu and the diagnostics. Main thread only.
     static private(set) var lastPrime: String?
 
-    /// How long the primer plays once it's playing, and the most it waits for that.
-    private static let primerPlays: TimeInterval = 1.2
-    private static let primerGivesUpAfter: TimeInterval = 4
+    /// The most the primer plays if the video never shows a frame (a failed or very slow load).
+    private static let primerLongest: TimeInterval = 30
 
     /**
      * With Continuous Audio Connection off, the HDMI link idles at stereo PCM, and sound the
@@ -115,58 +100,64 @@ enum AudioOutput {
      * PCM after a switch to the E-AC-3 track and back, and this app's TrueHD did too from then on.
      * Infuse users with Samsung soundbars report the same workaround.
      *
-     * So before the first video after the Apple TV wakes or its HDMI output changes, a second of
-     * silent Dolby Digital Plus Atmos plays, then the video loads. The stream is AetherEngine's
-     * (`silent-atmos.mp4`, written bit by bit by its `Scripts/make-silent-atmos.swift`), decoding
-     * to digital silence. Main thread; `done` is called on it.
+     * In Infuse the E-AC-3 was still playing when the TrueHD took over. A second of it played
+     * before the video loaded didn't widen the link: the load's few seconds of silence let it
+     * fall back to stereo. So silent Dolby Digital Plus Atmos plays from the start of every load
+     * until the video's own sound has started (`stopPrimer`), and the two overlap. The stream is
+     * AetherEngine's (`silent-atmos.mp4`, written bit by bit by its
+     * `Scripts/make-silent-atmos.swift`) and decodes to digital silence. Main thread.
      */
-    static func primeLink(_ done: @escaping () -> Void) {
-        guard !primed, primer == nil, routeIsHDMI,
-              let url = Bundle.main.url(forResource: "silent-atmos", withExtension: "mp4") else {
-            done()
-            return
-        }
-        primed = true
-        let before = routeSummary
-        let player = AVQueuePlayer()
-        player.automaticallyWaitsToMinimizeStalling = false
-        primer = player
-        primerLooper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
-        var finished = false
-        func finish(_ played: Bool) {
-            guard !finished else { return }
-            finished = true
-            primerWatch?.invalidate()
-            primerWatch = nil
-            player.pause()
-            primerLooper?.disableLooping()
-            primerLooper = nil
-            player.removeAllItems()
-            primer = nil
-            let outcome = (played ? "played" : "didn't start in \(Int(primerGivesUpAfter)) s")
-                + "; before: \(before); after: \(routeSummary)"
-            lastPrime = outcome
-            NSLog("[audio] Dolby primer: %@", outcome)
-            done()
-        }
-        primerWatch = player.observe(\.timeControlStatus, options: [.new]) { player, _ in
-            guard player.timeControlStatus == .playing else { return }
-            DispatchQueue.main.async {
-                primerWatch?.invalidate()
-                primerWatch = nil
-                DispatchQueue.main.asyncAfter(deadline: .now() + primerPlays) { finish(true) }
+    static func startPrimer() {
+        guard routeIsHDMI,
+              let url = Bundle.main.url(forResource: "silent-atmos", withExtension: "mp4") else { return }
+        primerTurn += 1
+        let turn = primerTurn
+        // The next video while the last one's primer still plays: it keeps playing, for this one.
+        if primer == nil {
+            primerBefore = routeSummary
+            primerPlayed = false
+            let player = AVQueuePlayer()
+            player.automaticallyWaitsToMinimizeStalling = false
+            primer = player
+            primerLooper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+            primerWatch = player.observe(\.timeControlStatus, options: [.new]) { player, _ in
+                guard player.timeControlStatus == .playing else { return }
+                DispatchQueue.main.async { primerPlayed = true }
             }
+            player.play()
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + primerGivesUpAfter) {
-            // Still waiting to play: the link is left as it was.
-            if primerWatch != nil { finish(false) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + primerLongest) {
+            if turn == primerTurn { finishPrimer("the video showed no picture in \(Int(primerLongest)) s") }
         }
-        player.play()
     }
 
-    /// The link may have gone back to stereo: the next video primes it again.
-    private static func linkMayHaveReset() {
-        DispatchQueue.main.async { primed = false }
+    /// The video's sound has started (or the video is gone): the primer stops `after` seconds,
+    /// so the decoded sound takes over the link while the Dolby still holds it.
+    static func stopPrimer(after: TimeInterval) {
+        guard primer != nil else { return }
+        primerTurn += 1
+        let turn = primerTurn
+        DispatchQueue.main.asyncAfter(deadline: .now() + after) {
+            if turn == primerTurn { finishPrimer(nil) }
+        }
+    }
+
+    private static func finishPrimer(_ why: String?) {
+        guard let player = primer else { return }
+        let error = player.error ?? player.currentItem?.error
+        primerWatch?.invalidate()
+        primerWatch = nil
+        player.pause()
+        primerLooper?.disableLooping()
+        primerLooper = nil
+        player.removeAllItems()
+        primer = nil
+        var outcome = primerPlayed ? "played" : "never played"
+        if let error { outcome += " (\(error.localizedDescription))" }
+        if let why { outcome += ", \(why)" }
+        outcome += "; before: \(primerBefore); after: \(routeSummary)"
+        lastPrime = outcome
+        NSLog("[audio] Dolby primer: %@", outcome)
     }
 
     /**

@@ -135,11 +135,10 @@ final class AetherPlayer {
         loading?.cancel()
         loading = Task { [weak self] in
             await withCheckedContinuation { done in AudioOutput.activate { done.resume() } }
-            guard generation == self?.generation else { return }
-            // A second of silent Dolby before the first video since the Apple TV woke, so decoded
-            // multichannel sound isn't downmixed into a stereo link (Continuous Audio Connection off).
-            await withCheckedContinuation { done in AudioOutput.primeLink { done.resume() } }
             guard let self, generation == self.generation else { return }
+            // Silent Dolby through the load, until the video's sound has started, so decoded
+            // multichannel sound isn't downmixed into a stereo link (Continuous Audio Connection off).
+            AudioOutput.startPrimer()
             do {
                 try await self.engine.load(
                     url: url,
@@ -231,6 +230,7 @@ final class AetherPlayer {
             status = code
         }
         NSLog("[player] failed: %@ (%@)", error, info.map { "\($0.kind.rawValue)" } ?? "no kind")
+        AudioOutput.stopPrimer(after: 0)
         listener?.playerEnded(reason: "error", error: error, cause: info?.message, status: status)
         listener?.playerState(["idle": true, "buffering": false])
     }
@@ -245,6 +245,7 @@ final class AetherPlayer {
         current = nil
         ended = true
         engine.stop()
+        AudioOutput.stopPrimer(after: 0)
         subtitles.reset()
         if wasPlaying { listener?.playerEnded(reason: "stop", error: nil, cause: nil, status: nil) }
         listener?.playerState(["idle": true, "buffering": false, "seeking": false])
@@ -270,7 +271,10 @@ final class AetherPlayer {
             listener?.playerState(["speed": Double(min(Float(speed), engine.maxSupportedRate))])
         }
         if case .track(let id)? = change.audio, let index = Int(id) {
+            // A switch to a decoded track rebuilds the sound; the Dolby holds the link over the change.
+            AudioOutput.startPrimer()
             engine.selectAudioTrack(index: index)
+            AudioOutput.stopPrimer(after: 8)
         }
         if let subtitle = change.subtitle {
             switch subtitle {
@@ -446,6 +450,8 @@ final class AetherPlayer {
                 guard let self, ready, self.current != nil, !self.ended else { return }
                 // The HDMI link widens from its idle stereo once sound plays (Continuous Audio Connection off).
                 AudioOutput.playbackStarted()
+                // The video's own sound plays alongside the Dolby for a few seconds, then alone.
+                AudioOutput.stopPrimer(after: 3)
                 self.listener?.playerState(["buffering": false])
                 self.listener?.playerEvent("restart")
             }
@@ -733,11 +739,14 @@ final class AetherPlayer {
         Task { [weak self] in
             await withCheckedContinuation { done in AudioOutput.activate { done.resume() } }
             guard let self, generation == self.generation else { return }
+            // The link has likely gone back to stereo while the app was away.
+            AudioOutput.startPrimer()
             do {
                 // It keeps the options and the transport, so a paused video comes back paused.
                 try await self.engine.reloadAtCurrentPosition()
                 guard generation == self.generation else { return }
                 if self.paused { self.engine.pause() } else { self.engine.play() }
+                AudioOutput.stopPrimer(after: 3)
             } catch is CancellationError {
             } catch {
                 guard generation == self.generation else { return }

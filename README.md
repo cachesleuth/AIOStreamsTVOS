@@ -92,10 +92,12 @@ on a Samsung TV with a Samsung HW-Q990F soundbar on eARC:
 
   A Dolby bitstream widens the link, and it stays wide for the PCM that follows: Infuse played
   TrueHD as stereo PCM, then as multichannel PCM after a switch to the E-AC-3 track and back,
-  and this app's TrueHD did too from then on. So before the first video after the Apple TV wakes
-  or its HDMI output changes, the app plays about a second of silent Dolby Digital Plus Atmos
-  (AetherEngine's `silent-atmos.mp4`), then loads the video. The app menu's Dolby primer line
-  gives the route before and after it. Not yet measured with the primer itself.
+  and this app's TrueHD did too from then on. A second of silent Dolby played before the video
+  loaded didn't do it: the load's silence let the link fall back to stereo. So silent Dolby
+  Digital Plus Atmos (AetherEngine's `silent-atmos.mp4`) plays through every load, a return from
+  the background and an audio track switch, and stops a few seconds after the video's own sound
+  has started, so the two overlap as in Infuse. The app menu's Dolby primer line says whether it
+  played. Its route reads 2 channels either way, so only the soundbar shows whether it worked.
 - Picture in picture closes on an HDR or frame-rate video: the window opens, the video goes back
   full screen, then the TV goes to the Home screen.
 
