@@ -86,15 +86,15 @@ enum BridgeScript {
    * WebKit's cache. A swap React made since is left alone. Measured on
    * scroll and keys, at most four times a second, and once after they stop.
    *
-   * Released past two screens and back within one: each row reaches that far
-   * sideways too, so a page of rows keeps a few screens of artwork each, not
-   * the seven of three either side. When tvOS warns of low memory, `trim`
-   * lets go of all but the screen and a little around it.
+   * Released past three screens and back within two: a picture put back
+   * within one was still being decoded as a scroll reached it, which judders.
+   * When tvOS warns of low memory, `trim` lets go of all but a little past
+   * where pictures come back, so the next sweep doesn't restore them at once.
    */
   const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-  const RELEASE_SCREENS = 2;
-  const RESTORE_SCREENS = 1;
-  const TRIM_SCREENS = 1.25;
+  const RELEASE_SCREENS = 3;
+  const RESTORE_SCREENS = 2;
+  const TRIM_SCREENS = 2.25;
   const SWEEP_EVERY = 250;
   const released = new WeakMap();
   const away = (rect, size, start, end) =>
