@@ -98,18 +98,24 @@ final class PictureInPicture: NSObject {
         guard prepareController() != nil else {
             return failed("Picture-in-picture isn't available for this video.")
         }
+        // The window plays the video even if it was paused at the press; it used to stay paused in it.
         // The engine's HDR or frame-rate mode goes first, in the app, where a paused video can be played
         // again; the window then opens on the Home screen's own mode, so tvOS has nothing to switch.
-        // A video that left the TV in the Home screen's mode opens the window straight away.
+        // A video that left the TV in the Home screen's mode opens the window straight away, once it plays.
         guard inVideoMode, let manager = window()?.avDisplayManager,
               let criteria = manager.preferredDisplayCriteria else {
-            return openWindow()
+            guard player.engine.state != .playing else { return openWindow() }
+            step("video paused; playing it for the window")
+            channel.change(Change(paused: false))
+            return whenPlaying(since: CACurrentMediaTime()) { [weak self] in
+                guard let self, self.channel.playing else { return }
+                self.openWindow()
+            }
         }
         heldCriteria = criteria
-        let resume = player.engine.state == .playing
         step("dropping the video's display mode")
         manager.preferredDisplayCriteria = nil
-        settleDisplayMode(manager, resume: resume) { [weak self] in
+        settleDisplayMode(manager, resume: true) { [weak self] in
             guard let self else { return }
             guard self.channel.playing else { return self.putBackDisplayMode() }
             self.openWindow()
@@ -190,6 +196,7 @@ final class PictureInPicture: NSObject {
     private func leaveApp(attempt: Int = 1) {
         guard active, UIApplication.shared.applicationState == .active else { return }
         step("to the Home screen (try \(attempt))")
+        sentHome = true
         suspendApp()
         guard attempt < 3 else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
@@ -217,8 +224,20 @@ final class PictureInPicture: NSObject {
     private static let allowTime: TimeInterval = 4
 
     func appWillResignActive() {
-        if active { step("app lost focus") }
+        guard active else { return }
+        step("app lost focus")
+        lostFocusAt = CACurrentMediaTime()
     }
+
+    /// When the app last lost focus with the window showing.
+    private var lostFocusAt: CFTimeInterval?
+    /// The app has been asked to go to the Home screen since the window showed.
+    private var sentHome = false
+    /// Focus away longer than this, after the app was sent to the Home screen, is the user leaving and
+    /// coming back, even without the app going to the background (tvOS can keep an app whose window
+    /// shows in the foreground). An ignored ask, or the window settling, gives focus back within a second
+    /// or so, and the asks are 0.8 s apart.
+    private static let awayTime: CFTimeInterval = 2.5
 
     /// The app is on the Home screen or behind another app.
     func appDidEnterBackground() {
@@ -229,9 +248,16 @@ final class PictureInPicture: NSObject {
         }
     }
 
-    /// Back in the app from the background, the video comes back with it. Focus coming back without
-    /// the app having left, as when tvOS ignores the Home screen ask, keeps the window as it is.
+    /// Back in the app from the background, or after a while on the Home screen, the video comes back
+    /// with it. Focus coming back at once, as when tvOS ignores the Home screen ask, keeps the window.
     func appDidBecomeActive() {
+        let away: CFTimeInterval? = lostFocusAt.map { CACurrentMediaTime() - $0 }
+        lostFocusAt = nil
+        if !wentAway, active, sentHome, let away, away >= Self.awayTime {
+            step(String(format: "focus back after %.1f s on the Home screen", away))
+            wentAway = true
+            left = true
+        }
         guard wentAway else {
             if active { step("focus back without leaving the app; window kept") }
             return
@@ -277,7 +303,7 @@ final class PictureInPicture: NSObject {
             let took: Double = CACurrentMediaTime() - began
             self.step("display mode " + how + String(format: " (%.2f s)", took))
             if resume, self.channel.playing, self.player.engine.state != .playing {
-                self.step("the switch paused the video; playing it again")
+                self.step("the video isn't playing; playing it again")
                 self.channel.change(Change(paused: false))
                 // Started a hundredth of a second after that, the window began ("window starting") and tvOS
                 // never said it showed, so the app never left for the Home screen. It waits for the video.
@@ -430,6 +456,8 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
             if !restoring { channel.change(Change(paused: true)) }
             restoring = false
             left = false
+            sentHome = false
+            lostFocusAt = nil
             // In the app again, the video's mode comes back; closed out on the Home screen, it waits for the app.
             if UIApplication.shared.applicationState != .background { putBackDisplayMode() }
             send(["type": "pip", "value": false])
