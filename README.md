@@ -339,8 +339,13 @@ dynamic frameworks that Xcode embeds in the app; nothing else in the app may bri
 own, or it takes the engine's symbols.
 
 `AIOSTREAMS_DIR=/path/to/AIOStreams bash scripts/fetch-web.sh` builds from a checkout you already have
-instead, and `AIOSTREAMS_REF=<branch or tag>` picks what to clone. The script only reads that repo.
-Safari's Develop menu on a Mac can inspect the page.
+instead, and `AIOSTREAMS_REF=<branch or tag>` picks what to clone. The script applies the patches in
+`patches/web/` for the build and takes them out again after it, so that repo is left as it was;
+`AIOSTREAMS_PATCHES=0` builds without them. They draw only the catalog cards near the screen, in long
+rows and in grids, so a long scroll doesn't keep every card it passed. A patch that no longer applies
+to AIOStreams stops the build and is named, to be redone against the new code. The app menu shows the
+web app's commit and how many patches it was built with. Safari's Develop menu on a Mac can inspect
+the page.
 
 ## Layout
 
@@ -355,6 +360,7 @@ Safari's Develop menu on a Mac can inspect the page.
 | `Shared`       | What the app and the extension both read: the saved list               |
 | `Packages`     | `AetherHost`: AetherEngine at a pinned commit, for the app to link |
 | `scripts`      | Building the web app into `WebBuild` (git-ignored) |
+| `patches/web`  | Changes to the AIOStreams web app, applied only for this app's build |
 
 ## Licences
 

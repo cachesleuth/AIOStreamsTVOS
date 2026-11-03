@@ -85,25 +85,35 @@ enum BridgeScript {
    * decoded copy, and gets it back as it nears the screen again, from
    * WebKit's cache. A swap React made since is left alone. Measured on
    * scroll and keys, at most four times a second, and once after they stop.
+   *
+   * Released past two screens and back within one: each row reaches that far
+   * sideways too, so a page of rows keeps a few screens of artwork each, not
+   * the seven of three either side. When tvOS warns of low memory, `trim`
+   * lets go of all but the screen and a little around it.
    */
   const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-  const RELEASE_SCREENS = 3;
-  const RESTORE_SCREENS = 1.5;
+  const RELEASE_SCREENS = 2;
+  const RESTORE_SCREENS = 1;
+  const TRIM_SCREENS = 1.25;
   const SWEEP_EVERY = 250;
   const released = new WeakMap();
   const away = (rect, size, start, end) =>
     Math.max(0, rect[start] - size, -rect[end]) / size;
-  const sweep = () => {
+  const sweep = (releaseAt = RELEASE_SCREENS) => {
     const w = window.innerWidth;
     const h = window.innerHeight;
     if (!w || !h) return;
+    // Every box is read before any picture changes, so the page is laid out once, not after each swap.
+    const found = [];
     for (const img of document.querySelectorAll('img[data-ui="artwork"]')) {
       const src = img.getAttribute('src');
       if (!src) continue;
       const rect = img.getBoundingClientRect();
       // Not laid out (a hidden page): left as it is.
       if (!rect.width && !rect.height) continue;
-      const far = Math.max(away(rect, h, 'top', 'bottom'), away(rect, w, 'left', 'right'));
+      found.push([img, src, Math.max(away(rect, h, 'top', 'bottom'), away(rect, w, 'left', 'right'))]);
+    }
+    for (const [img, src, far] of found) {
       if (src === BLANK) {
         const real = released.get(img);
         if (real === undefined) continue;
@@ -111,7 +121,7 @@ enum BridgeScript {
           released.delete(img);
           img.setAttribute('src', real);
         }
-      } else if (far > RELEASE_SCREENS && !src.startsWith('data:')) {
+      } else if (far > releaseAt && !src.startsWith('data:')) {
         released.set(img, src);
         img.setAttribute('src', BLANK);
       }
@@ -129,7 +139,8 @@ enum BridgeScript {
     }, SWEEP_EVERY);
     if (now - lastSweep < SWEEP_EVERY) return;
     lastSweep = now;
-    requestAnimationFrame(sweep);
+    // Not handed to the frame as it is, which would pass the frame's time as `releaseAt`.
+    requestAnimationFrame(() => sweep());
   };
   try {
     // Capture: the page and each row scroll in their own containers.
@@ -334,6 +345,10 @@ enum BridgeScript {
             if (form.requestSubmit) form.requestSubmit();
             else form.submit();
           }, 250);
+      },
+      /** tvOS is short of memory: artwork beyond the screen and a little around it lets go of its picture. */
+      trim() {
+        requestAnimationFrame(() => sweep(TRIM_SCREENS));
       },
       /** Whether the player's picture-in-picture button shows. */
       pip(offered) {

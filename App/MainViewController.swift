@@ -69,17 +69,27 @@ final class MainViewController: UIViewController, RemoteReceiver {
             self?.connected = false
             self?.showStatus("The page couldn't load.\n\(error)\n\nHold Play/Pause for options.")
         }
-        web.onProcessEnded = { [weak self] in
+        web.onProcessEnded = { [weak self] url in
+            guard let self else { return }
             // Most often memory; the page loads again where it was.
-            MemoryLog.pageEnded(playing: self?.player?.playing == true)
-            self?.flashStatus("The page ran out of memory and reloaded.")
+            MemoryLog.pageEnded(playing: self.player?.playing == true)
+            self.loadPage(at: url)
+            self.flashStatus("The page ran out of memory and reloaded.")
         }
+        MemoryLog.webMB = { [weak web] in
+            guard let mb = web?.webProcessMB, mb >= 0 else { return nil }
+            return mb
+        }
+        MemoryLog.startSampling()
         NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
         ) { [weak self] _ in
             // Delivered on the main queue.
             MainActor.assumeIsolated {
                 MemoryLog.warning(playing: self?.player?.playing == true)
+                // tvOS is short of memory, and the page's process is the most likely to be ended: its
+                // artwork near the screen only, until it's scrolled back to.
+                self?.callTV("trim()")
             }
         }
         web.onOpenURL = { [weak self] in self?.open($0) }
@@ -119,8 +129,11 @@ final class MainViewController: UIViewController, RemoteReceiver {
 
     // MARK: Page
 
-    /// The bridge script carries the app's copy of the page's storage, so it's made fresh for each load.
-    private func loadPage() {
+    /**
+     * The bridge script carries the app's copy of the page's storage, so it's made fresh for each load,
+     * a reload after the page's process ended included. `url` is where the page was, if it's one of the app's.
+     */
+    private func loadPage(at url: URL? = nil) {
         guard let web else { return }
         connected = false
         linksReady = false
@@ -131,8 +144,9 @@ final class MainViewController: UIViewController, RemoteReceiver {
             deviceId: Identity.deviceId,
             storage: storage.json
         ))
+        let ours = url.flatMap { $0.scheme?.lowercased() == WebApp.scheme ? $0 : nil }
         // `loadURL:` in Objective-C; Swift names it `load(_:)`.
-        web.load(WebApp.startURL)
+        web.load(ours ?? WebApp.startURL)
     }
 
     private func showStatus(_ text: String) {

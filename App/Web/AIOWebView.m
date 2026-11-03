@@ -418,8 +418,35 @@ static NSString *AIOMimeType(NSString *extension) {
     // Where the page was, rather than its start.
     NSURL *current = AIOSend0(self.webView, @"URL");
     NSURL *url = current ?: self.lastURL;
+    // The owner loads it, so the start script it sets carries the storage as it is now.
+    if (self.onProcessEnded) {
+        self.onProcessEnded(url);
+        return;
+    }
     if (url) AIOSendObject(self.webView, @"loadRequest:", [NSURLRequest requestWithURL:url]);
-    if (self.onProcessEnded) self.onProcessEnded();
+}
+
+- (NSInteger)webProcessMB {
+    Class pool = NSClassFromString(@"WKProcessPool");
+    id infos = AIOSend0(pool, @"_webContentProcessInfo") ?: AIOSend0(pool, @"_webContentProcessInfoForTesting");
+    if (![infos isKindOfClass:NSArray.class] || [(NSArray *)infos count] == 0) return -1;
+    pid_t page = 0;
+    SEL pageSel = NSSelectorFromString(@"_webProcessIdentifier");
+    if ([self.webView respondsToSelector:pageSel]) page = ((pid_t (*)(id, SEL))objc_msgSend)(self.webView, pageSel);
+    SEL footprintSel = NSSelectorFromString(@"physicalFootprint");
+    SEL pidSel = NSSelectorFromString(@"pid");
+    size_t largest = 0;
+    BOOL any = NO;
+    for (id info in (NSArray *)infos) {
+        if (![info respondsToSelector:footprintSel]) continue;
+        size_t bytes = ((size_t (*)(id, SEL))objc_msgSend)(info, footprintSel);
+        pid_t pid = [info respondsToSelector:pidSel] ? ((pid_t (*)(id, SEL))objc_msgSend)(info, pidSel) : 0;
+        if (page > 0 && pid == page) return (NSInteger)(bytes >> 20);
+        // Without the page's own, the largest: a spare process WebKit keeps warm is small.
+        if (bytes > largest) largest = bytes;
+        any = YES;
+    }
+    return any ? (NSInteger)(largest >> 20) : -1;
 }
 
 - (void)openURL:(NSURL *)url {

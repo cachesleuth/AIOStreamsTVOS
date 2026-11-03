@@ -17,8 +17,11 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) void (^onMessage)(NSDictionary<NSString *, id> *message);
 @property (nonatomic, copy, nullable) void (^onLoadFinished)(void);
 @property (nonatomic, copy, nullable) void (^onLoadFailed)(NSString *error);
-/** The page's process ended (most often for memory) and the page is loading again where it was. */
-@property (nonatomic, copy, nullable) void (^onProcessEnded)(void);
+/**
+ * The page's process ended (most often for memory). The handler loads the page
+ * again, at `url`, where it was; without one, the view loads it itself.
+ */
+@property (nonatomic, copy, nullable) void (^onProcessEnded)(NSURL *_Nullable url);
 /** A link to anywhere but the app's own pages, such as an external player's. */
 @property (nonatomic, copy, nullable) void (^onOpenURL)(NSURL *url);
 /** A file the app served, or failed to. */
@@ -42,6 +45,12 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)focusPage;
 /** Forgets everything WebKit saved for pages: storage, IndexedDB, caches. */
 - (void)removeAllWebData:(void (^)(void))done;
+/**
+ * The page's web process's memory as tvOS counts it against its limit, in MB,
+ * or -1 where WebKit doesn't say. WebKit's own process, so the app can't
+ * measure it itself; asked of WebKit's private process list.
+ */
+@property (nonatomic, readonly) NSInteger webProcessMB;
 
 @end
 

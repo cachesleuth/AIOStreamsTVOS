@@ -53,11 +53,33 @@ enum MPVConfig {
 /**
  * When the page's web process ended and what memory looked like then, to see
  * whether it runs out while browsing or while a video plays. The web process
- * is WebKit's own, so only the app's side can be measured here.
+ * is WebKit's own; its size comes from WebKit (`AIOWebView.webProcessMB`),
+ * sampled every few seconds, as it's gone by the time it has ended.
  */
+@MainActor
 enum MemoryLog {
     private(set) static var lines: [String] = []
     private(set) static var pageEnds = 0
+
+    /// The page's web process in MB, or nil where WebKit doesn't say.
+    static var webMB: () -> Int? = { nil }
+    private static var lastWebMB: Int?
+    private static var peakWebMB: Int?
+    private static var sampler: Timer?
+
+    /// Samples the web process from now on, for its size before it ends and its largest.
+    static func startSampling() {
+        guard sampler == nil else { return }
+        sampler = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+            MainActor.assumeIsolated { sample() }
+        }
+    }
+
+    private static func sample() {
+        guard let mb = webMB() else { return }
+        lastWebMB = mb
+        peakWebMB = max(peakWebMB ?? 0, mb)
+    }
 
     /// This app's own memory, as tvOS counts it against the app's limit.
     static var appMB: Int? {
@@ -75,12 +97,15 @@ enum MemoryLog {
     static var leftMB: Int { Int(os_proc_available_memory() >> 20) }
 
     static var now: String {
-        "app \(appMB.map { "\($0) MB" } ?? "?"), \(leftMB) MB left"
+        let page = webMB().map { "page \($0) MB, " } ?? ""
+        return page + "app \(appMB.map { "\($0) MB" } ?? "?"), \(leftMB) MB left"
     }
 
     static func pageEnded(playing: Bool) {
         pageEnds += 1
-        note("page's web process ended \(playing ? "with a video loaded" : "while browsing")")
+        let before = lastWebMB.map { "; page \($0) MB at most 5 s before" } ?? ""
+        lastWebMB = nil
+        note("page's web process ended \(playing ? "with a video loaded" : "while browsing")\(before)")
     }
 
     static func warning(playing: Bool) {
@@ -97,7 +122,8 @@ enum MemoryLog {
 
     /// For the app menu and the diagnostics.
     static var report: [String] {
-        ["Memory: \(now); the page reloaded \(pageEnds) times since launch"] + lines
+        let peak = peakWebMB.map { ", the page at most \($0) MB" } ?? ""
+        return ["Memory: \(now); the page reloaded \(pageEnds) times since launch\(peak)"] + lines
     }
 }
 

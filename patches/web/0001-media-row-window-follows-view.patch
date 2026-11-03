@@ -1,0 +1,58 @@
+diff --git a/packages/web/src/components/media-row.tsx b/packages/web/src/components/media-row.tsx
+index 77d106de..59b1a80b 100644
+--- a/packages/web/src/components/media-row.tsx
++++ b/packages/web/src/components/media-row.tsx
+@@ -79,28 +79,29 @@ const WINDOWED = 40;
+ /** Cards drawn past each side of the view, so the next one a key moves to is there. */
+ const MARGIN = 12;
+ 
+-/** The cards a long row draws: around its start at first, then wherever it has been scrolled. */
+-function useWindow(count: number, start: number, loading: boolean) {
+-  // Decided as the cards first arrive, so a row that grows as it pages keeps them all.
+-  const [windowed, setWindowed] = React.useState<boolean>();
+-  if (windowed === undefined && !loading && count)
+-    setWindowed(count > WINDOWED);
++/**
++ * The cards a long row draws: around its start at first, then wherever it has
++ * been scrolled. The range follows the view both ways, so a long scroll lets go
++ * of the cards it left behind, and it's tracked from the start, so a row that
++ * pages past `WINDOWED` is windowed around where it is.
++ */
++function useWindow(count: number, start: number) {
+   const [first] = React.useState<[number, number]>([
+     Math.max(0, start - MARGIN),
+     start + 2 * MARGIN,
+   ]);
+   const [range, setRange] = React.useState(first);
+   const view = React.useCallback((from: number, to: number) => {
+-    setRange((r) =>
+-      from - MARGIN < r[0] || to + MARGIN > r[1]
+-        ? [
+-            Math.max(0, Math.min(r[0], from - MARGIN)),
+-            Math.max(r[1], to + 2 * MARGIN),
+-          ]
+-        : r
+-    );
++    setRange((r) => {
++      const short = Math.max(0, from - MARGIN) < r[0] || to + MARGIN > r[1];
++      // Drawn well past the view on a side: what's beyond is let go.
++      const long = from - 4 * MARGIN > r[0] || to + 4 * MARGIN < r[1];
++      if (!short && !long) return r;
++      return [Math.max(0, from - 2 * MARGIN), to + 2 * MARGIN];
++    });
+   }, []);
+-  if (!windowed) return { drawn: () => true, fades: () => true };
++  if (count <= WINDOWED)
++    return { drawn: () => true, fades: () => true, onView: view };
+   return {
+     drawn: (i: number) => i >= range[0] && i < range[1],
+     // Only the first cards fade in; later ones are drawn ahead of the view.
+@@ -408,7 +409,7 @@ export function MediaRow({
+   const [lines] = useSetting(settings.interface.posterLines);
+   const width = itemClass ?? ITEM_WIDTH[shape];
+   const items = React.Children.toArray(children);
+-  const { drawn, fades, onView } = useWindow(items.length, start, !!loading);
++  const { drawn, fades, onView } = useWindow(items.length, start);
+   // A finger scrolls a plain scroller on the compositor; Embla is for a mouse to drag.
+   const touch = useMediaQuery('(pointer: coarse)');
+   if (!loading && !items.length) return null;
