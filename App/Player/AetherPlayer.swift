@@ -452,8 +452,8 @@ final class AetherPlayer {
                 guard let self, ready, self.current != nil, !self.ended else { return }
                 // The HDMI link widens from its idle stereo once sound plays (Continuous Audio Connection off).
                 AudioOutput.playbackStarted()
-                // The video's own sound plays alongside the Dolby, is paused and played under it, then plays alone.
-                self.settleAudio(after: 2)
+                // The video's own sound plays alongside the Dolby, then alone, then is paused and played.
+                self.settleAudio(after: 3)
                 self.listener?.playerState(["buffering": false])
                 self.listener?.playerEvent("restart")
             }
@@ -524,37 +524,38 @@ final class AetherPlayer {
         .store(in: &watching)
     }
 
-    /// How long `settleAudio` holds the video paused, and how long the Dolby plays on after it resumes.
+    /// How long after the Dolby stops `settleAudio` pauses the video, and for how long.
+    private static let reopenAfterPrimer: TimeInterval = 5
     private static let reopenPause: TimeInterval = 1
-    private static let primerAfterReopen: TimeInterval = 3
 
     /**
-     * Ends the Dolby primer once the video's sound has started, `after` seconds from now.
+     * Ends the Dolby primer `after` seconds from now, then, for sound the Apple TV decodes over more
+     * than 2 channels, pauses and plays the video once the soundbar has settled on its PCM.
      *
-     * Sound the Apple TV decodes, over more than 2 channels, first pauses and plays again while the
-     * Dolby still plays: the Dolby has widened the HDMI link, but the video's player set its sound
-     * output up at stereo before that and keeps it until a pause and play (measured by hand: stereo
-     * PCM, then multichannel PCM). The Dolby has to outlast the pause. Paused just as it stopped,
-     * nothing played for half a second, the link fell back to stereo, and no later pause and play
-     * brought it back. Hidden from the page.
+     * The Dolby widens the HDMI link, but the video's player set its sound output up at stereo
+     * before that and keeps it until a pause and play. Measured on the soundbar, all with
+     * Continuous Audio Connection off:
+     * - The Dolby stopping while the TrueHD played on, then a pause and play by hand some seconds
+     *   later: stereo PCM, then multichannel PCM. Twice, on two builds.
+     * - A pause and play just as the Dolby stopped: the link was silent for half a second and fell
+     *   back to stereo, and no later pause and play brought it back.
+     * - A pause and play while the Dolby still played: stereo PCM after the Dolby stopped, and
+     *   multichannel PCM after a pause and play by hand.
+     * So the Dolby stops while the video plays, and the pause comes `reopenAfterPrimer` later.
+     * Hidden from the page.
      */
     private func settleAudio(after delay: TimeInterval) {
+        AudioOutput.stopPrimer(after: delay)
         let generation = generation
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self, generation == self.generation else { return }
-            guard self.current != nil, !self.ended, !self.paused, !self.reopening,
-                  self.engine.state == .playing, let audio = self.activeAudio else {
-                AudioOutput.stopPrimer(after: 0)
-                return
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay + Self.reopenAfterPrimer) { [weak self] in
+            guard let self, generation == self.generation, self.current != nil, !self.ended,
+                  !self.paused, !self.reopening, self.engine.state == .playing,
+                  let audio = self.activeAudio else { return }
             let decoded = self.engine.audioDelivery == .decoded
                 || (self.engine.audioDelivery == .bridged && self.engine.loadedAudioIsLossless)
             var sent = audio.channels
             if let limit = self.shaping.maxChannels { sent = min(sent, limit) }
-            guard decoded, sent > 2 else {
-                AudioOutput.stopPrimer(after: 0)
-                return
-            }
+            guard decoded, sent > 2 else { return }
             self.reopening = true
             self.engine.pause()
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.reopenPause) { [weak self] in
@@ -565,8 +566,8 @@ final class AetherPlayer {
                 }
                 // Paused from the page meanwhile: it stays paused, and the page already knows.
                 if !self.paused { self.engine.play() }
-                AudioOutput.stopPrimer(after: Self.primerAfterReopen)
-                AudioOutput.notePrimer("paused and played the video under it, \(audio.channels) ch \(audio.codec)")
+                AudioOutput.notePrimer("paused and played the video \(Int(Self.reopenAfterPrimer)) s later, "
+                    + "\(audio.channels) ch \(audio.codec)")
                 // The play's own state change arrives after this call.
                 DispatchQueue.main.async { self.reopening = false }
             }
@@ -804,7 +805,7 @@ final class AetherPlayer {
                 try await self.engine.reloadAtCurrentPosition()
                 guard generation == self.generation else { return }
                 if self.paused { self.engine.pause() } else { self.engine.play() }
-                self.settleAudio(after: 2)
+                self.settleAudio(after: 3)
             } catch is CancellationError {
             } catch {
                 guard generation == self.generation else { return }

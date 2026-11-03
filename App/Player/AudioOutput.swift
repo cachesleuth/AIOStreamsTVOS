@@ -109,8 +109,8 @@ enum AudioOutput {
      *
      * The overlap widens the link (the soundbar shows Dolby, then PCM), but the video's player set
      * its output up at stereo before that, and keeps it: the soundbar stays at stereo PCM until a
-     * pause and play, which sets the output up again on the wide link. So the player pauses and
-     * plays the video while the primer still plays, then stops it (`AetherPlayer.settleAudio`).
+     * pause and play, which sets the output up again on the wide link. So the player stops the
+     * primer while the video plays, then pauses and plays the video (`AetherPlayer.settleAudio`).
      */
     static func startPrimer() {
         guard routeIsHDMI,

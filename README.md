@@ -98,13 +98,15 @@ on a Samsung TV with a Samsung HW-Q990F soundbar on eARC:
   the background and an audio track switch, and stops a few seconds after the video's own sound
   has started, so the two overlap as in Infuse. That widens the link (the soundbar shows Dolby),
   but the video's player has set its sound output up at stereo by then and keeps it: the soundbar
-  showed stereo PCM until a pause and play, then multichannel PCM. That pause has to come while
-  the Dolby still plays: paused just as the Dolby stopped, nothing played for half a second, the
-  link fell back to stereo, and no later pause and play brought it back. So two seconds after the
-  first frame, a video whose sound the Apple TV decodes over more than 2 channels pauses for a
-  second and plays again under the Dolby, which stops three seconds later. The page isn't told
-  about the pause. The app menu's Dolby primer line says whether it played and whether the video
-  was paused and played under it. Its route reads 2 channels either way, so only the
+  showed stereo PCM until a pause and play by hand, then multichannel PCM. When the pause comes
+  matters. Paused just as the Dolby stopped, the link was silent for half a second, fell back to
+  stereo, and no later pause and play brought it back. Paused while the Dolby still played, it
+  stayed at stereo once the Dolby stopped. Paused by hand some seconds after the Dolby had
+  stopped, with the TrueHD playing on, it went to multichannel, twice. So the Dolby stops three
+  seconds after the first frame while the video plays, and five seconds later a video whose sound
+  the Apple TV decodes over more than 2 channels pauses for a second and plays again. The page
+  isn't told about the pause. The app menu's Dolby primer line says whether the Dolby played and
+  whether the video was paused and played. Its route reads 2 channels either way, so only the
   soundbar shows whether it worked.
 - Picture in picture closes on an HDR or frame-rate video: the window opens, the video goes back
   full screen, then the TV goes to the Home screen.
