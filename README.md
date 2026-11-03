@@ -71,13 +71,28 @@ PCM and never Atmos.
   Connection off is 2 channels (AetherEngine#24). With it off, the link is still at 2 channels
   as a video starts too, and asking for those 2 holds it there, so the app never asks for 2 or
   fewer: it asks for the full width only once the link offers more than stereo, when the route
-  changes and as the picture starts, then one, three and six seconds later. TrueHD and DTS-HD
-  then play in full rather than downmixed. The statistics' PCM output is the channels sent, not
-  the link's width (32 with the setting on). The app menu's Audio output line gives the channels
-  in use, the most the route takes and the number asked for.
+  changes and as the picture starts, then one, three and six seconds later. That doesn't always
+  get the full width (see Continuous Audio Connection below). The statistics' PCM output is the
+  channels sent, not the link's width (32 with the setting on). The app menu's Audio output line
+  gives the channels in use, the most the route takes and the number asked for.
 
 For Atmos at all, set **Settings → Video and Audio → Audio Format** to **Auto** (or Change Format →
-**Dolby Atmos**) on the Apple TV. The player's statistics show the track, its decoder and the
+**Dolby Atmos**) on the Apple TV.
+
+Keep **Settings → Video and Audio → Audio Format → Continuous Audio Connection** on. With it off,
+on a Samsung TV with a Samsung HW-Q990F soundbar on eARC:
+
+- TrueHD and DTS-HD play as stereo. The session asks for 8 channels and gets them
+  (`preferred=8`), but tvOS keeps the HDMI output at 2 (`HDMIOutput[ch=2]`, `output=2`), so the
+  FLAC bridge's 8-channel PCM is downmixed. Infuse and Plex users report the same with Samsung TVs
+  and soundbars on eARC.
+- Picture in picture closes on an HDR or frame-rate video: the window opens, the video goes back
+  full screen, then the TV goes to the Home screen.
+
+With it on, both work: multichannel PCM in full and the window over the Home screen. The likely
+cause, unconfirmed, is that with it off tvOS sets the HDMI audio link up again at every change of
+sound format, and that the TV's eARC takes plain multichannel PCM only as stereo. `max=32` shows
+in the route with the setting off too, so the route doesn't tell the two settings apart. The player's statistics show the track, its decoder and the
 output: `E-AC-3 Atmos passthrough` is Atmos on its way to the receiver. The app
 menu (hold Play/Pause) and the diagnostics add the audio route and the engine's recent audio log.
 
