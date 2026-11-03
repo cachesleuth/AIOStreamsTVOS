@@ -1,31 +1,36 @@
-diff --git a/packages/web/src/pages/item.tsx b/packages/web/src/pages/item.tsx
-index a305b7c5..af3ba303 100644
---- a/packages/web/src/pages/item.tsx
-+++ b/packages/web/src/pages/item.tsx
-@@ -205,6 +205,60 @@ export function ItemPage({
-   );
- }
- 
-+/** The size a TV's wash is drawn at, before it's stretched over the backdrop. */
+diff --git a/packages/web/src/components/drawn-wash.tsx b/packages/web/src/components/drawn-wash.tsx
+new file mode 100644
+index 00000000..98858f85
+--- /dev/null
++++ b/packages/web/src/components/drawn-wash.tsx
+@@ -0,0 +1,61 @@
++import React from 'react';
++
++/** The size a wash is drawn at, before it's stretched over its box. */
 +const WASH_WIDTH = 12;
 +const WASH_HEIGHT = 18;
 +
 +/**
-+ * A TV's wash: the poster drawn a few pixels wide on a canvas and stretched,
-+ * which blurs it as the CSS filter does, but once. The filter is drawn again
-+ * on each frame the page or a card over it moves, which a TV can't keep up with.
++ * A blurred wash of a picture's colours for a TV: the picture drawn a few
++ * pixels wide on a canvas and stretched, which blurs it as a CSS blur does,
++ * but once. A CSS blur is drawn again on each frame the page, or anything
++ * over it, moves, which a TV can't keep up with.
 + */
-+function DrawnWash({
++export function DrawnWash({
 +  src,
 +  className,
 +  onLoad,
 +  onError,
++  ...rest
 +}: {
 +  src: string;
 +  className: string;
-+  onLoad(): void;
-+  onError(): void;
-+}) {
++  onLoad?(): void;
++  onError?(): void;
++} & Omit<
++  React.CanvasHTMLAttributes<HTMLCanvasElement>,
++  'onLoad' | 'onError' | 'className' | 'width' | 'height'
++>) {
 +  const canvas = React.useRef<HTMLCanvasElement>(null);
 +  const latest = React.useRef({ onLoad, onError });
 +  latest.current = { onLoad, onError };
@@ -34,14 +39,15 @@ index a305b7c5..af3ba303 100644
 +    img.decoding = 'async';
 +    img.onload = () => {
 +      const ctx = canvas.current?.getContext('2d');
-+      if (!ctx) return latest.current.onError();
++      if (!ctx) return latest.current.onError?.();
++      ctx.clearRect(0, 0, WASH_WIDTH, WASH_HEIGHT);
 +      ctx.imageSmoothingQuality = 'high';
 +      // eslint-disable-next-line lingui/no-unlocalized-strings -- a CSS filter
 +      if ('filter' in ctx) ctx.filter = 'saturate(1.5)';
 +      ctx.drawImage(img, 0, 0, WASH_WIDTH, WASH_HEIGHT);
-+      latest.current.onLoad();
++      latest.current.onLoad?.();
 +    };
-+    img.onerror = () => latest.current.onError();
++    img.onerror = () => latest.current.onError?.();
 +    img.src = src;
 +    return () => {
 +      img.onload = null;
@@ -50,20 +56,28 @@ index a305b7c5..af3ba303 100644
 +  }, [src]);
 +  return (
 +    <canvas
++      {...rest}
 +      ref={canvas}
-+      data-ui="item-backdrop-image"
-+      data-wash
++      aria-hidden
 +      width={WASH_WIDTH}
 +      height={WASH_HEIGHT}
 +      className={className}
 +    />
 +  );
 +}
-+
- /** Past the landscape art, the poster stands in as a blurred wash of its colours. */
- function Backdrop({
-   images,
-@@ -222,7 +276,23 @@ function Backdrop({
+diff --git a/packages/web/src/pages/item.tsx b/packages/web/src/pages/item.tsx
+index a305b7c5..e184d902 100644
+--- a/packages/web/src/pages/item.tsx
++++ b/packages/web/src/pages/item.tsx
+@@ -103,6 +103,7 @@ import { useHold } from '../lib/use-hold';
+ import { useExternalReturn } from '../lib/playback/external-return';
+ import { focusDialog, tab, tabList, useDialogStart } from '../lib/input';
+ import { CachedImage } from '../components/cached-image';
++import { DrawnWash } from '../components/drawn-wash';
+ import { TrailerButton } from '../components/trailers';
+ import { trailersOf } from '../lib/playback/trailers';
+ import { openPartySheet } from '../components/party/party-sheet';
+@@ -222,7 +223,26 @@ function Backdrop({
    const src = sources[attempt];
    const loaded = !!src && loadedSrc === src;
    const wash = attempt >= images.length;
@@ -74,8 +88,11 @@ index a305b7c5..af3ba303 100644
 +      count: (f.key === key ? f.count : 0) + 1,
 +    }));
 +  const image = src && wash && currentHost().tv ? (
++    // A CSS blur is drawn again on each frame the page scrolls, which a TV can't keep up with.
 +    <DrawnWash
 +      key={src}
++      data-ui="item-backdrop-image"
++      data-wash
 +      src={src}
 +      onLoad={() => setLoadedSrc(src)}
 +      onError={fail}
