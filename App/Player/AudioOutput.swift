@@ -49,33 +49,49 @@ enum AudioOutput {
             do {
                 if session.category != .playback { declare() }
                 try session.setActive(true)
-                try session.setPreferredOutputNumberOfChannels(session.maximumOutputNumberOfChannels)
             } catch {
                 NSLog("[audio] activate: %@", error.localizedDescription)
             }
+            widenNow()
             NSLog("[audio] active: %@", routeSummary)
             DispatchQueue.main.async(execute: done)
-            // With Continuous Audio Connection off, the HDMI link is still coming back up when a video
-            // starts and offers 2 channels; the session asked then stays at 2 and multichannel PCM
-            // (TrueHD, DTS-HD) plays downmixed. Asked again once the link has widened, it plays in full.
-            for delay in [1.0, 3.0] {
-                queue.asyncAfter(deadline: .now() + delay) { widen() }
-            }
         }
     }
 
-    /// Asks for every channel the route takes, if it now takes more than the session has.
+    /**
+     * The video has started playing. With Continuous Audio Connection off the
+     * HDMI link idles at 2 channels and only widens once multichannel sound
+     * plays, which is after activation and usually after the file has opened;
+     * asked again then, multichannel PCM (TrueHD, DTS-HD) plays in full.
+     */
+    static func playbackStarted() {
+        widen()
+        for delay in [1.0, 3.0, 6.0] {
+            queue.asyncAfter(deadline: .now() + delay) { widenNow() }
+        }
+        queue.asyncAfter(deadline: .now() + 6.5) { NSLog("[audio] playing: %@", routeSummary) }
+    }
+
     private static func widen() {
-        queue.async {
-            let session = AVAudioSession.sharedInstance()
-            let most = session.maximumOutputNumberOfChannels
-            guard most > session.outputNumberOfChannels else { return }
-            do {
-                try session.setPreferredOutputNumberOfChannels(most)
-                NSLog("[audio] widened: %@", routeSummary)
-            } catch {
-                NSLog("[audio] widen: %@", error.localizedDescription)
-            }
+        queue.async { widenNow() }
+    }
+
+    /**
+     * Asks for every channel the route takes, if it now takes more than the
+     * session has. Never asks for 2 or fewer: a preference of 2, written while
+     * the link idles at stereo, holds the route at stereo once the link could
+     * take more, which is what downmixed TrueHD with the setting off.
+     */
+    private static func widenNow() {
+        let session = AVAudioSession.sharedInstance()
+        let most = session.maximumOutputNumberOfChannels
+        // Written only when it changes, so the route change a write causes ends here.
+        guard most > 2, session.preferredOutputNumberOfChannels != most else { return }
+        do {
+            try session.setPreferredOutputNumberOfChannels(most)
+            NSLog("[audio] widened: %@", routeSummary)
+        } catch {
+            NSLog("[audio] widen: %@", error.localizedDescription)
         }
     }
 
@@ -87,6 +103,7 @@ enum AudioOutput {
         }
         return (ports.isEmpty ? "no output" : ports.joined(separator: ", "))
             + "; \(session.outputNumberOfChannels) of \(session.maximumOutputNumberOfChannels) channels in use"
+            + ", \(session.preferredOutputNumberOfChannels) asked"
     }
 
     /// Every output is HDMI: the only route that carries Dolby MAT, so Atmos, from an Apple TV.

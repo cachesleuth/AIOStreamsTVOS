@@ -440,6 +440,8 @@ final class AetherPlayer {
             .removeDuplicates()
             .sink { [weak self] ready in
                 guard let self, ready, self.current != nil, !self.ended else { return }
+                // The HDMI link widens from its idle stereo once sound plays (Continuous Audio Connection off).
+                AudioOutput.playbackStarted()
                 self.listener?.playerState(["buffering": false])
                 self.listener?.playerEvent("restart")
             }
