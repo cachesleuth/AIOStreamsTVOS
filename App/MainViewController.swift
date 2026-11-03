@@ -196,12 +196,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
             let player = PlayerChannel(
                 player: engine,
                 subtitlesDir: AppFolders.subtitles,
-                send: { [weak self] message in
-                    guard let self else { return }
-                    // A test video is the app's own, so the page hears nothing of it.
-                    guard !self.testing else { return self.testReport(message) }
-                    self.sendToPage(message)
-                },
+                send: { [weak self] message in self?.sendToPage(message) },
                 showVideo: { [weak self] shown in
                     self?.videoView.isHidden = !shown
                     self?.subtitleView.isHidden = !shown
@@ -239,7 +234,6 @@ final class MainViewController: UIViewController, RemoteReceiver {
     private func setUpInput() {
         input.keyDown = { [weak self] key, repeated in
             guard let self else { return }
-            if self.testing { return self.testKey(key) }
             let call = "window.__aioTV&&window.__aioTV.down(\(self.jsString(key)),\(repeated))"
             guard repeated else {
                 self.web?.evaluateJavaScript(call)
@@ -252,12 +246,11 @@ final class MainViewController: UIViewController, RemoteReceiver {
             web.evaluateJavaScript(call) { [weak self] in self?.repeatInFlight = false }
         }
         input.keyUp = { [weak self] key in
-            guard let self, !self.testing else { return }
+            guard let self else { return }
             self.callTV("up(\(self.jsString(key)))")
         }
         input.back = { [weak self] in
             guard let self else { return }
-            if self.testing { return self.stopTestVideo(nil) }
             if self.connected { self.sendToPage(["type": "back"]) } else { self.leaveApp() }
         }
         input.menu = { [weak self] in self?.showAppMenu() }
@@ -283,18 +276,9 @@ final class MainViewController: UIViewController, RemoteReceiver {
         lines.append("")
         lines += TopShelf.report
         let held = AetherPlayer.heldSourceConnection
-        let testAction: AppMenu.Action
-        if testing {
-            testAction = AppMenu.Action(title: "Stop the test video", destructive: false) { [weak self] in self?.stopTestVideo(nil) }
-        } else {
-            testAction = AppMenu.Action(title: "Play a test video…", destructive: false) { [weak self] in self?.askTestVideo() }
-        }
         let menu = AppMenu(title: "AIOStreams", text: lines.joined(separator: "\n"), actions: [
-            testAction,
-            AppMenu.Action(title: "Reload", destructive: false) { [weak self] in
-                self?.stopTestVideo(nil)
-                self?.loadPage()
-            },
+            AppMenu.Action(title: "Play a test video…", destructive: false) { [weak self] in self?.askTestVideo() },
+            AppMenu.Action(title: "Reload", destructive: false) { [weak self] in self?.loadPage() },
             AppMenu.Action(title: held ? "Use ranged source requests" : "Hold one source connection", destructive: false) {
                 [weak self] in
                 AetherPlayer.heldSourceConnection = !held
@@ -489,17 +473,15 @@ final class MainViewController: UIViewController, RemoteReceiver {
 
     // MARK: Test video
 
-    /// A video from a URL typed in the app menu plays in the app's player, without the page.
-    private var testing = false
+    /// A video from a URL typed in the app menu plays in the page's own player, with its controls
+    /// (`patches/web/0006-test-video-page.patch`), reached by an `aiostreams://test-video` link.
     private static let testURLKey = "debug.testVideoURL"
 
     private func askTestVideo() {
         guard presentedViewController == nil else { return }
-        // The page's player owns the engine while it has a video open.
-        if player?.playing == true { return flashStatus("Close the video playing first.") }
         let alert = UIAlertController(
             title: "Play a test video",
-            message: "An http(s) link to a video file or an HLS playlist. It plays in the app's player with the page's player settings; Back stops it.",
+            message: "An http(s) link to a video file or an HLS playlist. It plays in the page's player, with its controls and settings; Back stops it.",
             preferredStyle: .alert
         )
         alert.addTextField { field in
@@ -526,59 +508,18 @@ final class MainViewController: UIViewController, RemoteReceiver {
             web?.focusPage()
             return flashStatus("That isn't an http(s) link.")
         }
-        guard let engine, player?.playing != true else { return flashStatus("Close the video playing first.") }
+        // The page opens it once it's loaded and listening for links; one with a video open closes that first.
+        guard connected else {
+            web?.focusPage()
+            return flashStatus("The page hasn't loaded yet.")
+        }
         UserDefaults.standard.set(url, forKey: Self.testURLKey)
-        testing = true
-        web?.isHidden = true
-        videoView.isHidden = false
-        subtitleView.isHidden = false
-        UIApplication.shared.isIdleTimerDisabled = true
-        engine.load(LoadRequest(
-            url: url, headers: [:], startMs: 0, append: false,
-            audioLanguages: [], subtitleLanguages: [], subtitleMode: .default
-        ))
-        flashStatus("Test video: Play/Pause or Select pauses, left and right skip 10 s, Back stops it, and holding Play/Pause opens the app menu.")
-    }
-
-    /// Back to the page, with why the video ended if it failed.
-    private func stopTestVideo(_ problem: String?) {
-        guard testing else { return }
-        engine?.stop()
-        // The stop's own reports are the test's too; the page hears from the player again after them.
-        testing = false
-        videoView.isHidden = true
-        subtitleView.isHidden = true
-        UIApplication.shared.isIdleTimerDisabled = false
-        web?.isHidden = false
+        // The link's value is decoded once by the page, so everything but unreserved characters is escaped.
+        var unreserved = CharacterSet.alphanumerics
+        unreserved.insert(charactersIn: "-._~")
+        let value = url.addingPercentEncoding(withAllowedCharacters: unreserved) ?? url
+        receiveLink("aiostreams://test-video?url=\(value)")
         web?.focusPage()
-        if let problem { flashStatus(problem) }
-    }
-
-    /// The player's reports while a test video plays: only its end matters here.
-    private func testReport(_ message: Message) {
-        guard message.text("type") == "player-ended" else { return }
-        switch message.text("reason") {
-        case "eof":
-            stopTestVideo("The test video ended.")
-        case "error":
-            let detail = [message.text("error"), message.text("cause")].compactMap { $0 }.joined(separator: "\n")
-            stopTestVideo("The test video didn't play.\n\(detail)")
-        default:
-            break
-        }
-    }
-
-    private func testKey(_ key: String) {
-        guard let engine else { return }
-        switch key {
-        case "MediaPlayPause", "Enter":
-            engine.change(Change(paused: engine.engine.state == .playing))
-        case "ArrowLeft", "ArrowRight":
-            let step: Double = key == "ArrowLeft" ? -10_000 : 10_000
-            engine.seek(engine.engine.clock.currentTime * 1000 + step)
-        default:
-            break
-        }
     }
 
     // MARK: App state

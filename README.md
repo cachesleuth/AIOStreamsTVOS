@@ -134,9 +134,11 @@ connection instead of ranged requests (AetherEngine's `heldSourceConnection`, HT
 from the next video.
 
 The menu's **Play a test video…** plays an http(s) link you type (a file or an HLS playlist; the
-last one is remembered) in the app's player, without the page but with the page's player
-settings. Play/Pause or Select pauses, left and right skip 10 seconds, Back stops it, and the
-menu reports on it as on any video. It's offered only while the page has no video open.
+last one is remembered) in the page's own player, with its controls, track menus, statistics and
+picture-in-picture button, and its player settings. The app opens it with an
+`aiostreams://test-video?url=…` link, which a web patch adds along with the page that plays it
+(`patches/web/0006-test-video-page.patch`); nothing is reported to the server. A video already open
+closes first, Back stops the test video, and the menu reports on it as on any video.
 
 ### HDR
 

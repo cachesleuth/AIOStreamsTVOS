@@ -1,0 +1,240 @@
+diff --git a/packages/web/src/lib/app-links.ts b/packages/web/src/lib/app-links.ts
+index 94579d10..6bd5be9a 100644
+--- a/packages/web/src/lib/app-links.ts
++++ b/packages/web/src/lib/app-links.ts
+@@ -76,6 +76,11 @@ export function parseAppLink(raw: string): AppLink | null {
+     }
+     case 'search':
+       return { kind: 'route', path: to.search(param(query, 'q') ?? undefined) };
++    // The Apple TV app's test video, a bare link played in the player.
++    case 'test-video': {
++      const url = param(query, 'url');
++      return isAddress(url) ? { kind: 'route', path: to.testVideo(url) } : null;
++    }
+     case 'party': {
+       const invite = parseInvite(raw);
+       return invite ? { kind: 'party', invite } : null;
+diff --git a/packages/web/src/lib/paths.ts b/packages/web/src/lib/paths.ts
+index 104d6658..ba5938ed 100644
+--- a/packages/web/src/lib/paths.ts
++++ b/packages/web/src/lib/paths.ts
+@@ -35,6 +35,7 @@ export const to = {
+     `/play/${itemId}?source=${sourceId}${startMs ? `&start=${Math.round(startMs)}` : ''}${playlist ? `&playlist=${playlist}` : ''}`,
+   trailer: (itemId: string, index = 0) =>
+     `/play/trailer/${itemId}${index ? `?trailer=${index}` : ''}`,
++  testVideo: (url: string) => `/test-video?url=${encodeURIComponent(url)}`,
+ };
+ 
+ /** An episode has no page of its own; it opens its show at its season. */
+diff --git a/packages/web/src/pages/test-video.tsx b/packages/web/src/pages/test-video.tsx
+new file mode 100644
+index 00000000..498a9599
+--- /dev/null
++++ b/packages/web/src/pages/test-video.tsx
+@@ -0,0 +1,163 @@
++import { t } from '@lingui/core/macro';
++import { Trans } from '@lingui/react/macro';
++import React from 'react';
++import { BiArrowBack } from 'react-icons/bi';
++import { Button } from '@aiostreams/ui/button';
++import { cn } from '@aiostreams/ui/core/styling';
++import { useSession } from '../lib/session';
++import { currentHost } from '../lib/hosts';
++import { usePlayerFullscreen } from '../lib/playback/fullscreen';
++import { usePlayer } from '../lib/playback/use-player';
++import { videoEngine } from '../lib/playback/video';
++import { useNowPlaying } from '../lib/playback/now-playing';
++import { useAction } from '../lib/input';
++import { settings, useSetting } from '../lib/settings';
++import { usePlaybackPrefs, type PlaybackPrefs } from '../lib/user-config';
++import { goBack, to } from '../lib/paths';
++import { closePlayback } from '../lib/playback/session';
++import type { BaseItemDto, SourceInfo } from '../lib/types';
++import { PlayerControls } from '../components/player/controls';
++import { Cover } from '../components/player/cover';
++import { OBJECT_FIT, usePlayerPage } from './player';
++
++/*
++ * A video from a bare http(s) link in the full player, for the Apple TV app's
++ * "Play a test video": no item on the server, so nothing is reported to it,
++ * as with a trailer. The app's now-playing item goes out, so the app's own
++ * controls (picture in picture, the remote's media keys) work on it too.
++ */
++
++const TEST_ID = 'test-video';
++
++/** The link's file name, for a title when none is given. */
++function nameOf(url: string): string {
++  try {
++    const path = new URL(url).pathname;
++    return decodeURIComponent(path.slice(path.lastIndexOf('/') + 1)) || url;
++  } catch {
++    return url;
++  }
++}
++
++export function TestVideoPage({ url, title }: { url: string; title: string }) {
++  usePlayerPage();
++  const host = currentHost();
++  usePlayerFullscreen(!host.player || !!host.fullscreen);
++  // The one player can't play both.
++  React.useEffect(closePlayback, []);
++  const prefs = usePlaybackPrefs();
++  const item = React.useMemo<BaseItemDto>(
++    () => ({ Id: TEST_ID, Name: title || nameOf(url) }),
++    [url, title]
++  );
++  const back = () => goBack(to.home);
++  if (!/^https?:\/\//i.test(url))
++    return (
++      <TestVideoFailure
++        message={t`A test video needs an http(s) link.`}
++        onBack={back}
++      />
++    );
++  if (prefs.isLoading) return <Cover item={item} />;
++  return (
++    <PlayedTestVideo item={item} url={url} prefs={prefs.prefs} onBack={back} />
++  );
++}
++
++function PlayedTestVideo({
++  item,
++  url,
++  prefs,
++  onBack,
++}: {
++  item: BaseItemDto;
++  url: string;
++  prefs: PlaybackPrefs;
++  onBack(): void;
++}) {
++  const { client } = useSession();
++  const video = React.useRef<HTMLVideoElement>(null);
++  const [hostPlayer] = React.useState(() => currentHost().player);
++  const [fit] = useSetting(settings.video.fit);
++  const [subtitleStyle] = useSetting(settings.subtitle.style);
++  const source = React.useMemo<SourceInfo>(
++    () => ({ Id: `${TEST_ID}:${url}`, MediaStreams: [] }),
++    [url]
++  );
++  const player = usePlayer(hostPlayer ?? videoEngine(video), {
++    client,
++    item,
++    url,
++    source,
++    startMs: 0,
++    onEnded: onBack,
++    prefs,
++    subtitleStyle,
++  });
++  useNowPlaying(item, player, { onStop: onBack });
++  const failure = player.state.error ?? '';
++  return (
++    <div
++      data-page="player"
++      data-name="test-video"
++      className={cn('fixed inset-0', !hostPlayer && 'bg-black')}
++    >
++      {hostPlayer ? (
++        <Cover item={item} hidden={player.state.started} />
++      ) : (
++        <video
++          ref={video}
++          data-ui="video"
++          className={cn('h-full w-full', OBJECT_FIT[fit])}
++          autoPlay
++          playsInline
++        />
++      )}
++      {player.state.error ? (
++        <TestVideoFailure
++          message={t`The test video didn't play: ${failure}`}
++          onBack={onBack}
++        />
++      ) : (
++        <PlayerControls
++          item={item}
++          player={player}
++          segments={null}
++          onBack={onBack}
++          caption={url}
++        />
++      )}
++    </div>
++  );
++}
++
++function TestVideoFailure({
++  message,
++  onBack,
++}: {
++  message: string;
++  onBack(): void;
++}) {
++  useAction('back', onBack);
++  return (
++    <div
++      data-ui="player-error"
++      className="fixed inset-0 z-20 flex items-center justify-center bg-black/90 p-6"
++    >
++      <div className="max-w-md space-y-4 text-center">
++        <p className="text-lg font-semibold [overflow-wrap:anywhere]">
++          {message}
++        </p>
++        <Button
++          intent="white"
++          className="rounded-full"
++          leftIcon={<BiArrowBack className="rtl:-scale-x-100" />}
++          autoFocus
++          onClick={onBack}
++        >
++          <Trans>Back</Trans>
++        </Button>
++      </div>
++    </div>
++  );
++}
+diff --git a/packages/web/src/router.tsx b/packages/web/src/router.tsx
+index 5a9f72f7..398d76b3 100644
+--- a/packages/web/src/router.tsx
++++ b/packages/web/src/router.tsx
+@@ -21,6 +21,7 @@ import { HistoryPage } from './pages/history';
+ import { DownloadsPage } from './pages/downloads';
+ import { openPlayback } from './lib/playback/session';
+ import { TrailerPage } from './pages/trailer';
++import { TestVideoPage } from './pages/test-video';
+ import { Button } from '@aiostreams/ui/button';
+ import { LuffyError } from '@aiostreams/ui/shared/luffy-error';
+ import { SettingsPage } from './pages/settings';
+@@ -208,6 +209,22 @@ const trailerRoute = createRoute({
+   component: TrailerRouteView,
+ });
+ 
++/** A bare http(s) link in the player, for the Apple TV app's test videos. */
++const testVideoRoute = createRoute({
++  getParentRoute: () => shellRoute,
++  path: '/test-video',
++  validateSearch: (search: Record<string, unknown>) => ({
++    url: search.url == null ? '' : String(search.url),
++    title: search.title == null ? '' : String(search.title),
++  }),
++  component: TestVideoRouteView,
++});
++
++function TestVideoRouteView(): React.ReactElement {
++  const { url, title } = testVideoRoute.useSearch();
++  return <TestVideoPage key={url} url={url} title={title} />;
++}
++
+ function TrailerRouteView(): React.ReactElement {
+   const { itemId } = trailerRoute.useParams();
+   const { trailer } = trailerRoute.useSearch();
+@@ -242,6 +259,7 @@ const routeTree = rootRoute.addChildren([
+     personRoute,
+     playRoute,
+     trailerRoute,
++    testVideoRoute,
+   ]),
+ ]);
+ 
