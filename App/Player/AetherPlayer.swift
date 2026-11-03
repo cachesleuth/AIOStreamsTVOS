@@ -140,7 +140,12 @@ final class AetherPlayer {
             guard let self, generation == self.generation else { return }
             // Silent Dolby through the load, until the video's sound has started, so decoded
             // multichannel sound isn't downmixed into a stereo link (Continuous Audio Connection off).
-            AudioOutput.startPrimer()
+            // A trailer goes without: it's a couple of minutes long and nearly always stereo.
+            if request.isTrailer {
+                AudioOutput.stopPrimer(after: 0)
+            } else {
+                AudioOutput.startPrimer()
+            }
             do {
                 try await self.engine.load(
                     url: url,
@@ -274,7 +279,7 @@ final class AetherPlayer {
         }
         if case .track(let id)? = change.audio, let index = Int(id) {
             // A switch to a decoded track rebuilds the sound; the Dolby holds the link over the change.
-            AudioOutput.startPrimer()
+            if primes { AudioOutput.startPrimer() }
             engine.selectAudioTrack(index: index)
             settleAudio(after: 6)
         }
@@ -529,6 +534,9 @@ final class AetherPlayer {
     private static let reopenAfterPrimer: TimeInterval = 2
     private static let reopenPause: TimeInterval = 0.3
 
+    /// The file gets the Dolby primer and `settleAudio`'s pause and play: everything but a trailer.
+    private var primes: Bool { current?.isTrailer != true }
+
     /**
      * Ends the Dolby primer `after` seconds from now, then, for sound the Apple TV decodes over more
      * than 2 channels, pauses and plays the video once the soundbar has settled on its PCM.
@@ -547,6 +555,7 @@ final class AetherPlayer {
      */
     private func settleAudio(after delay: TimeInterval) {
         AudioOutput.stopPrimer(after: delay)
+        guard primes else { return }
         let generation = generation
         DispatchQueue.main.asyncAfter(deadline: .now() + delay + Self.reopenAfterPrimer) { [weak self] in
             guard let self, generation == self.generation, self.current != nil, !self.ended,
@@ -800,7 +809,7 @@ final class AetherPlayer {
             await withCheckedContinuation { done in AudioOutput.activate { done.resume() } }
             guard let self, generation == self.generation else { return }
             // The link has likely gone back to stereo while the app was away.
-            AudioOutput.startPrimer()
+            if self.primes { AudioOutput.startPrimer() }
             do {
                 // It keeps the options and the transport, so a paused video comes back paused.
                 try await self.engine.reloadAtCurrentPosition()

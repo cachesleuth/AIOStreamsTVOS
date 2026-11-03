@@ -24,6 +24,12 @@ struct LoadRequest {
     let audioLanguages: [String]
     let subtitleLanguages: [String]
     let subtitleMode: SubtitleMode
+
+    /// A trailer, from YouTube (`YouTube.resolve`), whose streams all come from googlevideo.com.
+    var isTrailer: Bool {
+        guard let host = URL(string: url)?.host?.lowercased() else { return false }
+        return host == "googlevideo.com" || host.hasSuffix(".googlevideo.com")
+    }
 }
 
 /// A track to show, or none at all.
