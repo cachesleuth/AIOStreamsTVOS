@@ -1,0 +1,58 @@
+diff --git a/packages/web/src/lib/cache/index.ts b/packages/web/src/lib/cache/index.ts
+index 44276cfd..6637d981 100644
+--- a/packages/web/src/lib/cache/index.ts
++++ b/packages/web/src/lib/cache/index.ts
+@@ -28,6 +28,8 @@ declare module '@tanstack/react-query' {
+       cache?: CacheCategory;
+       /** False for an answer that isn't saved. */
+       keep?: (data: unknown) => boolean;
++      /** What of an answer is saved, where not all of it. */
++      saved?: (data: unknown) => unknown;
+     };
+   }
+ }
+@@ -139,7 +141,8 @@ export async function persister(
+   const shown = query.state;
+   const save = (data: unknown) => {
+     if (query.meta?.keep?.(data) === false) return;
+-    void writeQuery({ id: query.queryHash, category, scope }, Date.now(), data)
++    const kept = query.meta?.saved ? query.meta.saved(data) : data;
++    void writeQuery({ id: query.queryHash, category, scope }, Date.now(), kept)
+       .then(schedulePrune)
+       .catch(() => undefined);
+   };
+diff --git a/packages/web/src/lib/queries.ts b/packages/web/src/lib/queries.ts
+index 5ffe1167..440b672a 100644
+--- a/packages/web/src/lib/queries.ts
++++ b/packages/web/src/lib/queries.ts
+@@ -31,6 +31,21 @@ import type {
+ } from './types';
+ 
+ const PAGE = 60;
++/** The pages of a catalog kept on the device, however far it was scrolled. */
++const SAVED_PAGES = 2;
++
++/**
++ * A catalog's first pages, as saved: one scrolled far would otherwise come
++ * back with every page at once, to draw and to fetch again.
++ */
++function firstPages(data: unknown): unknown {
++  const pages = data as { pages?: unknown[]; pageParams?: unknown[] };
++  if (!pages.pages || pages.pages.length <= SAVED_PAGES) return data;
++  return {
++    pages: pages.pages.slice(0, SAVED_PAGES),
++    pageParams: pages.pageParams?.slice(0, SAVED_PAGES) ?? [],
++  };
++}
+ 
+ /** Every key starts here, so a user switch or sign-out drops them all. */
+ function useKey() {
+@@ -171,7 +186,7 @@ export function useItemPages(
+       opts.recursive,
+       pageSize,
+     ],
+-    meta: { cache: 'home' },
++    meta: { cache: 'home', saved: firstPages },
+     initialPageParam: 0,
+     queryFn: ({ pageParam }) =>
+       client.get<BaseItemDtoQueryResult>('/Items', {

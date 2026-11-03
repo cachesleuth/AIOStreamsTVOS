@@ -342,7 +342,8 @@ own, or it takes the engine's symbols.
 instead, and `AIOSTREAMS_REF=<branch or tag>` picks what to clone. The script applies the patches in
 `patches/web/` for the build and takes them out again after it, so that repo is left as it was;
 `AIOSTREAMS_PATCHES=0` builds without them. They draw only the catalog cards near the screen, in long
-rows and in grids, so a long scroll doesn't keep every card it passed. A patch that no longer applies
+rows and in grids, so a long scroll doesn't keep every card it passed, and save only a catalog's first
+two pages on the device, so one scrolled far doesn't come back with every page at once. A patch that no longer applies
 to AIOStreams stops the build and is named, to be redone against the new code. The app menu shows the
 web app's commit and how many patches it was built with. Safari's Develop menu on a Mac can inspect
 the page.
