@@ -103,11 +103,13 @@ on a Samsung TV with a Samsung HW-Q990F soundbar on eARC:
   stereo, and no later pause and play brought it back. Paused while the Dolby still played, it
   stayed at stereo once the Dolby stopped. Paused by hand some seconds after the Dolby had
   stopped, with the TrueHD playing on, it went to multichannel, twice. So the Dolby stops three
-  seconds after the first frame while the video plays, and five seconds later a video whose sound
-  the Apple TV decodes over more than 2 channels pauses for a second and plays again. The page
-  isn't told about the pause. Measured from a cold link: TrueHD showed Dolby during the load,
-  then stereo PCM, then multichannel PCM after the pause, about eight seconds in. DTS and DTS-HD
-  did the same, and so did a return from the background and an audio track switch. Not yet
+  seconds after the first frame while the video plays, and two seconds later a video whose sound
+  the Apple TV decodes over more than 2 channels pauses for 0.3 seconds and plays again. The page
+  isn't told about the pause. Measured from a cold link, with the pause five seconds after the
+  Dolby and a second long: TrueHD showed Dolby during the load, then stereo PCM, then
+  multichannel PCM after the pause, about eight seconds in, with about three seconds of silence
+  as the soundbar switched. DTS and DTS-HD did the same, and so did a return from the background
+  and an audio track switch. The shorter, earlier pause is on trial. Not yet
   measured: whether every 7.1 channel reaches its own speaker. The app menu's Dolby primer line says whether the
   Dolby played and whether the video was paused and played. Its route reads 2 channels either
   way, so only the soundbar shows whether it worked.

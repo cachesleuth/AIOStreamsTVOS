@@ -524,9 +524,10 @@ final class AetherPlayer {
         .store(in: &watching)
     }
 
-    /// How long after the Dolby stops `settleAudio` pauses the video, and for how long.
-    private static let reopenAfterPrimer: TimeInterval = 5
-    private static let reopenPause: TimeInterval = 1
+    /// How long after the Dolby stops `settleAudio` pauses the video, and for how long. Measured to work
+    /// at 5 s and 1 s; these shorter values are on trial, and go back to those if the link stays at stereo.
+    private static let reopenAfterPrimer: TimeInterval = 2
+    private static let reopenPause: TimeInterval = 0.3
 
     /**
      * Ends the Dolby primer `after` seconds from now, then, for sound the Apple TV decodes over more
