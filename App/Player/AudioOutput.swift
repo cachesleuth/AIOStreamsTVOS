@@ -76,6 +76,63 @@ enum AudioOutput {
         queue.async { widenNow() }
     }
 
+    /// What the last relink did, for the app menu and the diagnostics. Main thread only.
+    static var lastRelink: String?
+
+    /// Whether the HDMI link is at stereo or less while every output is HDMI: the case `relink` is for.
+    static var linkIsNarrow: Bool {
+        routeIsHDMI && AVAudioSession.sharedInstance().outputNumberOfChannels <= 2
+    }
+
+    /**
+     * An experiment for Continuous Audio Connection off: the session is turned off and on again
+     * once a multichannel track the Apple TV decodes has loaded, so tvOS sets the HDMI link up
+     * again knowing the sound is multichannel. Asking for more channels on an active session
+     * leaves the link at 2 (`2 of 32 channels in use, 8 asked`), whichever player plays the sound.
+     *
+     * `pause` and `resume` run on the main thread around it: tvOS refuses to turn off a session
+     * whose sound is playing (`isBusy`), so the player pauses first and is retried a few times
+     * while its output winds down. `done` gets the outcome, on the main thread.
+     */
+    static func relink(pause: @escaping () -> Void, resume: @escaping () -> Void,
+                       done: @escaping (String) -> Void) {
+        let before = routeSummary
+        pause()
+        queue.async {
+            let session = AVAudioSession.sharedInstance()
+            var deactivated = false
+            var lastError: Error?
+            for _ in 0..<6 {
+                Thread.sleep(forTimeInterval: 0.25)
+                do {
+                    try session.setActive(false)
+                    deactivated = true
+                    break
+                } catch {
+                    lastError = error
+                }
+            }
+            do {
+                try session.setActive(true)
+            } catch {
+                NSLog("[audio] relink reactivate: %@", error.localizedDescription)
+            }
+            widenNow()
+            // The link takes a moment to settle after activation.
+            Thread.sleep(forTimeInterval: 0.5)
+            widenNow()
+            let after = routeSummary
+            let outcome = deactivated
+                ? "session off and on; before: \(before); after: \(after)"
+                : "session wouldn't turn off (\(lastError?.localizedDescription ?? "?")); \(after)"
+            NSLog("[audio] relink: %@", outcome)
+            DispatchQueue.main.async {
+                resume()
+                done(outcome)
+            }
+        }
+    }
+
     /**
      * Asks for every channel the route takes, if it now takes more than the
      * session has. Never asks for 2 or fewer: a preference of 2, written while
