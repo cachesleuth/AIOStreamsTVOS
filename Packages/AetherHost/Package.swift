@@ -24,7 +24,7 @@ let package = Package(
         .library(name: "AetherHost", targets: ["AetherHost"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/mickey2266/AetherEngine", revision: "bab5795dcb093dfca5634a05519e56e56e98e887"),
+        .package(url: "https://github.com/mickey2266/AetherEngine", revision: "d9dde0cfcba1a68bc9d938a72bb2ef884a5ca13e"),
     ],
     targets: [
         .target(
