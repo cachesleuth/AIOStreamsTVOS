@@ -1,0 +1,90 @@
+diff --git a/packages/web/src/pages/item.tsx b/packages/web/src/pages/item.tsx
+index a305b7c5..af3ba303 100644
+--- a/packages/web/src/pages/item.tsx
++++ b/packages/web/src/pages/item.tsx
+@@ -205,6 +205,60 @@ export function ItemPage({
+   );
+ }
+ 
++/** The size a TV's wash is drawn at, before it's stretched over the backdrop. */
++const WASH_WIDTH = 12;
++const WASH_HEIGHT = 18;
++
++/**
++ * A TV's wash: the poster drawn a few pixels wide on a canvas and stretched,
++ * which blurs it as the CSS filter does, but once. The filter is drawn again
++ * on each frame the page or a card over it moves, which a TV can't keep up with.
++ */
++function DrawnWash({
++  src,
++  className,
++  onLoad,
++  onError,
++}: {
++  src: string;
++  className: string;
++  onLoad(): void;
++  onError(): void;
++}) {
++  const canvas = React.useRef<HTMLCanvasElement>(null);
++  const latest = React.useRef({ onLoad, onError });
++  latest.current = { onLoad, onError };
++  React.useEffect(() => {
++    const img = new Image();
++    img.decoding = 'async';
++    img.onload = () => {
++      const ctx = canvas.current?.getContext('2d');
++      if (!ctx) return latest.current.onError();
++      ctx.imageSmoothingQuality = 'high';
++      // eslint-disable-next-line lingui/no-unlocalized-strings -- a CSS filter
++      if ('filter' in ctx) ctx.filter = 'saturate(1.5)';
++      ctx.drawImage(img, 0, 0, WASH_WIDTH, WASH_HEIGHT);
++      latest.current.onLoad();
++    };
++    img.onerror = () => latest.current.onError();
++    img.src = src;
++    return () => {
++      img.onload = null;
++      img.onerror = null;
++    };
++  }, [src]);
++  return (
++    <canvas
++      ref={canvas}
++      data-ui="item-backdrop-image"
++      data-wash
++      width={WASH_WIDTH}
++      height={WASH_HEIGHT}
++      className={className}
++    />
++  );
++}
++
+ /** Past the landscape art, the poster stands in as a blurred wash of its colours. */
+ function Backdrop({
+   images,
+@@ -222,7 +276,23 @@ function Backdrop({
+   const src = sources[attempt];
+   const loaded = !!src && loadedSrc === src;
+   const wash = attempt >= images.length;
+-  const image = src && (
++  const fail = () =>
++    setFailed((f) => ({
++      key,
++      count: (f.key === key ? f.count : 0) + 1,
++    }));
++  const image = src && wash && currentHost().tv ? (
++    <DrawnWash
++      key={src}
++      src={src}
++      onLoad={() => setLoadedSrc(src)}
++      onError={fail}
++      className={cn(
++        'absolute inset-0 h-full w-full scale-125 object-cover transition-opacity duration-700',
++        loaded ? 'opacity-50' : 'opacity-0'
++      )}
++    />
++  ) : src && (
+     <CachedImage
+       key={src}
+       data-ui="item-backdrop-image"
