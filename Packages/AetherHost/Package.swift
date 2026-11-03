@@ -3,14 +3,14 @@
 import PackageDescription
 
 /*
- * AetherEngine, for the app to link, pinned to one commit: the engine ships
+ * AetherEngine, for the app to link, pinned to one release: the engine ships
  * its FFmpeg build with it, and the app is tested against one.
  *
- * The commit is on the app's fork, branch `aiostreams`: upstream 7.54.0 plus
- * lossless surround (TrueHD, DTS-HD) delivered as 24-bit PCM with a labelled
- * channel layout instead of FLAC, so tvOS switches the HDMI link to
- * multichannel with Continuous Audio Connection off, and 7.1 in CoreMedia's
- * channel order. Back to an upstream version once that is released there.
+ * Upstream, without the app's fork (mickey2266/AetherEngine, branch
+ * `aiostreams`), which wrote 7.1 FLAC in CoreMedia's channel order (f98f3bdb)
+ * and then lossless surround as labelled 24-bit PCM (bab5795d, d9dde0cf).
+ * Upstream writes 7.1 FLAC in FFmpeg's order, which measured with the side and
+ * rear surrounds swapped; back to the fork if that shows again.
  *
  * Its optional components (TrueHD Atmos and DTS:X object rendering, Dolby
  * Vision dual layer) stay off: the app plays TrueHD and DTS-HD as 7.1 PCM, as
@@ -24,7 +24,7 @@ let package = Package(
         .library(name: "AetherHost", targets: ["AetherHost"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/mickey2266/AetherEngine", revision: "d9dde0cfcba1a68bc9d938a72bb2ef884a5ca13e"),
+        .package(url: "https://github.com/superuser404notfound/AetherEngine", exact: "7.56.0"),
     ],
     targets: [
         .target(
