@@ -23,6 +23,18 @@ enum AudioOutput {
         } catch {
             NSLog("[audio] category: %@", error.localizedDescription)
         }
+        watchRoute()
+    }
+
+    private static var watchingRoute = false
+
+    /// A route change is where an HDMI link that came up at 2 channels gets its full width.
+    private static func watchRoute() {
+        guard !watchingRoute else { return }
+        watchingRoute = true
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: nil, queue: nil
+        ) { _ in widen() }
     }
 
     private static let queue = DispatchQueue(label: "audio-session", qos: .userInitiated)
@@ -43,6 +55,27 @@ enum AudioOutput {
             }
             NSLog("[audio] active: %@", routeSummary)
             DispatchQueue.main.async(execute: done)
+            // With Continuous Audio Connection off, the HDMI link is still coming back up when a video
+            // starts and offers 2 channels; the session asked then stays at 2 and multichannel PCM
+            // (TrueHD, DTS-HD) plays downmixed. Asked again once the link has widened, it plays in full.
+            for delay in [1.0, 3.0] {
+                queue.asyncAfter(deadline: .now() + delay) { widen() }
+            }
+        }
+    }
+
+    /// Asks for every channel the route takes, if it now takes more than the session has.
+    private static func widen() {
+        queue.async {
+            let session = AVAudioSession.sharedInstance()
+            let most = session.maximumOutputNumberOfChannels
+            guard most > session.outputNumberOfChannels else { return }
+            do {
+                try session.setPreferredOutputNumberOfChannels(most)
+                NSLog("[audio] widened: %@", routeSummary)
+            } catch {
+                NSLog("[audio] widen: %@", error.localizedDescription)
+            }
         }
     }
 

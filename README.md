@@ -68,7 +68,11 @@ PCM and never Atmos.
   track's 5.1 or 7.1 bed as PCM.
 - **The audio session** is only activated when a video starts. Activating it at launch, as the mpv
   build did, fixes the HDMI route at what the link reported then, which with Continuous Audio
-  Connection off is 2 channels (AetherEngine#24).
+  Connection off is 2 channels (AetherEngine#24). With it off, the link is often still at 2
+  channels as a video starts too, so the app asks for the full width again when the route
+  changes and a second and three seconds in; TrueHD and DTS-HD then play in full rather than
+  downmixed. The statistics' PCM output is the channels sent, not the link's width (32 with the
+  setting on).
 
 For Atmos at all, set **Settings → Video and Audio → Audio Format** to **Auto** (or Change Format →
 **Dolby Atmos**) on the Apple TV. The player's statistics show the track, its decoder and the

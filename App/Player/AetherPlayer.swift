@@ -801,7 +801,12 @@ final class AetherPlayer {
                 stats["outputChannels"] = object.layout.speakers.count
             } else if engine.audioDelivery == .decoded || (engine.audioDelivery == .bridged && engine.loadedAudioIsLossless) {
                 stats["outputMime"] = "audio/raw"
-                stats["outputChannels"] = AVAudioSession.sharedInstance().outputNumberOfChannels
+                // The channels sent: the track's, less any the page's channel setting folds away, and no
+                // more than the output has open. The output alone reads the HDMI link's width, 32 channels
+                // with Continuous Audio Connection on, which says nothing about the sound.
+                var sent = min(audio.channels, AVAudioSession.sharedInstance().outputNumberOfChannels)
+                if let limit = shaping.maxChannels { sent = min(sent, limit) }
+                stats["outputChannels"] = max(1, sent)
             }
         }
         if let telemetry = engine.liveTelemetry {
