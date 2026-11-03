@@ -803,10 +803,10 @@ final class AetherPlayer {
                 stats["outputChannels"] = object.layout.speakers.count
             } else if engine.audioDelivery == .decoded || (engine.audioDelivery == .bridged && engine.loadedAudioIsLossless) {
                 stats["outputMime"] = "audio/raw"
-                // The channels sent: the track's, less any the page's channel setting folds away, and no
-                // more than the output has open. The output alone reads the HDMI link's width, 32 channels
-                // with Continuous Audio Connection on, which says nothing about the sound.
-                var sent = min(audio.channels, AVAudioSession.sharedInstance().outputNumberOfChannels)
+                // The channels sent: the track's, less any the page's channel setting folds away. The audio
+                // session's channel counts say nothing about the sound over HDMI: 2 of 32 with Continuous Audio
+                // Connection on or off, while a TrueHD 7.1 channel check plays every speaker.
+                var sent = audio.channels
                 if let limit = shaping.maxChannels { sent = min(sent, limit) }
                 stats["outputChannels"] = max(1, sent)
             }
@@ -936,8 +936,10 @@ final class AetherPlayer {
 }
 
 private extension AetherEngine {
-    /// The audio bridge was asked for FLAC, which reaches the receiver as PCM.
+    /// The audio bridge delivers FLAC or 24-bit PCM ("→ FLAC bridge", "→ PCM bridge"), which reach the
+    /// receiver as PCM.
     var loadedAudioIsLossless: Bool {
-        activeAudioDecoder?.localizedCaseInsensitiveContains("flac") == true
+        guard let pipeline = activeAudioDecoder else { return false }
+        return pipeline.localizedCaseInsensitiveContains("flac") || pipeline.localizedCaseInsensitiveContains("PCM bridge")
     }
 }
