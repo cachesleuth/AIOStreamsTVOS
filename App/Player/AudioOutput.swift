@@ -1,6 +1,7 @@
 import AetherHost
 import AVFoundation
 import Foundation
+import UIKit
 
 /**
  * The audio session, set up for Dolby Atmos over HDMI.
@@ -34,7 +35,22 @@ enum AudioOutput {
         watchingRoute = true
         NotificationCenter.default.addObserver(
             forName: AVAudioSession.routeChangeNotification, object: nil, queue: nil
-        ) { _ in widen() }
+        ) { note in
+            widen()
+            // A new output or a wake can set the HDMI link up again at stereo. Not the route changes
+            // a channel preference or the primer's own format change cause, or every video would prime.
+            let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            switch raw.flatMap(AVAudioSession.RouteChangeReason.init(rawValue:)) {
+            case .newDeviceAvailable, .oldDeviceUnavailable, .wakeFromSleep, .override, .noSuitableRouteForCategory:
+                linkMayHaveReset()
+            default:
+                break
+            }
+        }
+        // The Apple TV sleeping suspends the app, and the TV and soundbar usually sleep with it.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification, object: nil, queue: nil
+        ) { _ in linkMayHaveReset() }
     }
 
     private static let queue = DispatchQueue(label: "audio-session", qos: .userInitiated)
@@ -76,61 +92,81 @@ enum AudioOutput {
         queue.async { widenNow() }
     }
 
-    /// What the last relink did, for the app menu and the diagnostics. Main thread only.
-    static var lastRelink: String?
+    // MARK: Dolby primer
 
-    /// Whether the HDMI link is at stereo or less while every output is HDMI: the case `relink` is for.
-    static var linkIsNarrow: Bool {
-        routeIsHDMI && AVAudioSession.sharedInstance().outputNumberOfChannels <= 2
-    }
+    /// Whether the primer has played since the Apple TV last went to sleep or the HDMI output last changed.
+    private static var primed = false
+    private static var primer: AVQueuePlayer?
+    private static var primerLooper: AVPlayerLooper?
+    private static var primerWatch: NSKeyValueObservation?
+    /// What the primer last did, for the app menu and the diagnostics. Main thread only.
+    static private(set) var lastPrime: String?
+
+    /// How long the primer plays once it's playing, and the most it waits for that.
+    private static let primerPlays: TimeInterval = 1.2
+    private static let primerGivesUpAfter: TimeInterval = 4
 
     /**
-     * An experiment for Continuous Audio Connection off: the session is turned off and on again
-     * once a multichannel track the Apple TV decodes has loaded, so tvOS sets the HDMI link up
-     * again knowing the sound is multichannel. Asking for more channels on an active session
-     * leaves the link at 2 (`2 of 32 channels in use, 8 asked`), whichever player plays the sound.
+     * With Continuous Audio Connection off, the HDMI link idles at stereo PCM, and sound the
+     * Apple TV decodes (TrueHD, DTS-HD, anything shaped) plays downmixed into it, whichever
+     * player plays it: asking the session for more channels doesn't widen it. A Dolby bitstream
+     * does, and the link stays wide for the PCM that follows. Measured on an Apple TV 4K into a
+     * Samsung TV and HW-Q990F on eARC: Infuse played TrueHD as stereo PCM, then as multichannel
+     * PCM after a switch to the E-AC-3 track and back, and this app's TrueHD did too from then on.
+     * Infuse users with Samsung soundbars report the same workaround.
      *
-     * `pause` and `resume` run on the main thread around it: tvOS refuses to turn off a session
-     * whose sound is playing (`isBusy`), so the player pauses first and is retried a few times
-     * while its output winds down. `done` gets the outcome, on the main thread.
+     * So before the first video after the Apple TV wakes or its HDMI output changes, a second of
+     * silent Dolby Digital Plus Atmos plays, then the video loads. The stream is AetherEngine's
+     * (`silent-atmos.mp4`, written bit by bit by its `Scripts/make-silent-atmos.swift`), decoding
+     * to digital silence. Main thread; `done` is called on it.
      */
-    static func relink(pause: @escaping () -> Void, resume: @escaping () -> Void,
-                       done: @escaping (String) -> Void) {
+    static func primeLink(_ done: @escaping () -> Void) {
+        guard !primed, primer == nil, routeIsHDMI,
+              let url = Bundle.main.url(forResource: "silent-atmos", withExtension: "mp4") else {
+            done()
+            return
+        }
+        primed = true
         let before = routeSummary
-        pause()
-        queue.async {
-            let session = AVAudioSession.sharedInstance()
-            var deactivated = false
-            var lastError: Error?
-            for _ in 0..<6 {
-                Thread.sleep(forTimeInterval: 0.25)
-                do {
-                    try session.setActive(false)
-                    deactivated = true
-                    break
-                } catch {
-                    lastError = error
-                }
-            }
-            do {
-                try session.setActive(true)
-            } catch {
-                NSLog("[audio] relink reactivate: %@", error.localizedDescription)
-            }
-            widenNow()
-            // The link takes a moment to settle after activation.
-            Thread.sleep(forTimeInterval: 0.5)
-            widenNow()
-            let after = routeSummary
-            let outcome = deactivated
-                ? "session off and on; before: \(before); after: \(after)"
-                : "session wouldn't turn off (\(lastError?.localizedDescription ?? "?")); \(after)"
-            NSLog("[audio] relink: %@", outcome)
+        let player = AVQueuePlayer()
+        player.automaticallyWaitsToMinimizeStalling = false
+        primer = player
+        primerLooper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+        var finished = false
+        func finish(_ played: Bool) {
+            guard !finished else { return }
+            finished = true
+            primerWatch?.invalidate()
+            primerWatch = nil
+            player.pause()
+            primerLooper?.disableLooping()
+            primerLooper = nil
+            player.removeAllItems()
+            primer = nil
+            let outcome = (played ? "played" : "didn't start in \(Int(primerGivesUpAfter)) s")
+                + "; before: \(before); after: \(routeSummary)"
+            lastPrime = outcome
+            NSLog("[audio] Dolby primer: %@", outcome)
+            done()
+        }
+        primerWatch = player.observe(\.timeControlStatus, options: [.new]) { player, _ in
+            guard player.timeControlStatus == .playing else { return }
             DispatchQueue.main.async {
-                resume()
-                done(outcome)
+                primerWatch?.invalidate()
+                primerWatch = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + primerPlays) { finish(true) }
             }
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + primerGivesUpAfter) {
+            // Still waiting to play: the link is left as it was.
+            if primerWatch != nil { finish(false) }
+        }
+        player.play()
+    }
+
+    /// The link may have gone back to stereo: the next video primes it again.
+    private static func linkMayHaveReset() {
+        DispatchQueue.main.async { primed = false }
     }
 
     /**

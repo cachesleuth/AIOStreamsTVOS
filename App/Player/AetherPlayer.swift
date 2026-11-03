@@ -43,9 +43,6 @@ final class AetherPlayer {
     private var watching = Set<AnyCancellable>()
     private var loading: Task<Void, Never>?
     private var generation = 0
-    /// The load whose audio session was turned off and on (`relinkIfNarrow`), and whether that's under way.
-    private var relinkedGeneration = -1
-    private var relinking = false
 
     /// The file loaded or loading, and the one to play after it.
     private(set) var current: LoadRequest?
@@ -138,6 +135,10 @@ final class AetherPlayer {
         loading?.cancel()
         loading = Task { [weak self] in
             await withCheckedContinuation { done in AudioOutput.activate { done.resume() } }
+            guard generation == self?.generation else { return }
+            // A second of silent Dolby before the first video since the Apple TV woke, so decoded
+            // multichannel sound isn't downmixed into a stereo link (Continuous Audio Connection off).
+            await withCheckedContinuation { done in AudioOutput.primeLink { done.resume() } }
             guard let self, generation == self.generation else { return }
             do {
                 try await self.engine.load(
@@ -447,7 +448,6 @@ final class AetherPlayer {
                 AudioOutput.playbackStarted()
                 self.listener?.playerState(["buffering": false])
                 self.listener?.playerEvent("restart")
-                self.relinkIfNarrow()
             }
             .store(in: &watching)
         engine.$duration
@@ -516,43 +516,8 @@ final class AetherPlayer {
         .store(in: &watching)
     }
 
-    /**
-     * Multichannel sound the Apple TV decodes (TrueHD, DTS-HD, or anything shaped to more than
-     * stereo) on an HDMI link still at stereo: the audio session is turned off and on once per
-     * video (`AudioOutput.relink`), an experiment for Continuous Audio Connection off. The pause
-     * it needs isn't reported to the page.
-     */
-    private func relinkIfNarrow() {
-        guard relinkedGeneration != generation, !relinking, !paused, let audio = activeAudio else { return }
-        let decoded = engine.audioDelivery == .decoded
-            || (engine.audioDelivery == .bridged && engine.loadedAudioIsLossless)
-        var sent = audio.channels
-        if let limit = shaping.maxChannels { sent = min(sent, limit) }
-        guard decoded, sent > 2, AudioOutput.linkIsNarrow else { return }
-        relinkedGeneration = generation
-        relinking = true
-        let generation = generation
-        AudioOutput.relink(
-            pause: { [weak self] in self?.engine.pause() },
-            resume: { [weak self] in
-                guard let self else { return }
-                self.relinking = false
-                guard generation == self.generation, self.current != nil, !self.ended else { return }
-                if self.paused { self.engine.pause() } else { self.engine.play() }
-            },
-            done: { outcome in AudioOutput.lastRelink = outcome }
-        )
-    }
-
     private func stateChanged(_ state: PlaybackState) {
         guard current != nil, !ended else { return }
-        // The relink's own pause and resume.
-        if relinking {
-            switch state {
-            case .paused, .playing: return
-            default: break
-            }
-        }
         switch state {
         case .playing:
             listener?.playerState(["paused": false])
@@ -892,9 +857,7 @@ final class AetherPlayer {
         }
         lines.append("Audio shaping: \(engine.audioShapingState.rawValue)")
         lines.append("Audio output: \(AudioOutput.routeSummary)")
-        if relinkedGeneration == generation {
-            lines.append("Audio relink: " + (relinking ? "under way" : AudioOutput.lastRelink ?? "?"))
-        }
+        if let prime = AudioOutput.lastPrime { lines.append("Dolby primer: \(prime)") }
         if !AudioOutput.routeIsHDMI { lines.append("Atmos needs the HDMI output; this route can't carry Dolby MAT") }
         var connection = "Source connection: " + (openedHeld ? "held (one connection)" : "ranged requests")
         if openedHeld != Self.heldSourceConnection { connection += "; the next video opens with the other" }

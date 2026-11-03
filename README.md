@@ -89,6 +89,13 @@ on a Samsung TV with a Samsung HW-Q990F soundbar on eARC:
   on eARC. E-AC-3 and AC-3 played as a stream copy are unaffected: they reach the soundbar still
   encoded, E-AC-3 Atmos inside Dolby MAT on a 2-channel carrier, and the soundbar decodes every
   channel itself (Dolby's 7.1.4 demo plays in full with the setting off).
+
+  A Dolby bitstream widens the link, and it stays wide for the PCM that follows: Infuse played
+  TrueHD as stereo PCM, then as multichannel PCM after a switch to the E-AC-3 track and back,
+  and this app's TrueHD did too from then on. So before the first video after the Apple TV wakes
+  or its HDMI output changes, the app plays about a second of silent Dolby Digital Plus Atmos
+  (AetherEngine's `silent-atmos.mp4`), then loads the video. The app menu's Dolby primer line
+  gives the route before and after it. Not yet measured with the primer itself.
 - Picture in picture closes on an HDR or frame-rate video: the window opens, the video goes back
   full screen, then the TV goes to the Home screen.
 
@@ -332,5 +339,6 @@ Safari's Develop menu on a Mac can inspect the page.
 ## Licences
 
 AetherEngine is LGPL-3.0 with an app store exception, and its FFmpeg build is LGPL-2.1, linked
-dynamically. Builds of this app are for personal use. The web app is AIOStreams', under its
+dynamically. `App/Player/silent-atmos.mp4` is AetherEngine's, written by its
+`Scripts/make-silent-atmos.swift` (from SpatialAudioBridge, Apache-2.0). Builds of this app are for personal use. The web app is AIOStreams', under its
 licence.
