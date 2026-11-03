@@ -43,6 +43,8 @@ final class AetherPlayer {
     private var watching = Set<AnyCancellable>()
     private var loading: Task<Void, Never>?
     private var generation = 0
+    /// The pause and play of `reopenAudioOutput` is under way, so the page isn't told about it.
+    private var reopening = false
 
     /// The file loaded or loading, and the one to play after it.
     private(set) var current: LoadRequest?
@@ -274,7 +276,7 @@ final class AetherPlayer {
             // A switch to a decoded track rebuilds the sound; the Dolby holds the link over the change.
             AudioOutput.startPrimer()
             engine.selectAudioTrack(index: index)
-            AudioOutput.stopPrimer(after: 8)
+            AudioOutput.stopPrimer(after: 8) { [weak self] in self?.reopenAudioOutput() }
         }
         if let subtitle = change.subtitle {
             switch subtitle {
@@ -451,7 +453,7 @@ final class AetherPlayer {
                 // The HDMI link widens from its idle stereo once sound plays (Continuous Audio Connection off).
                 AudioOutput.playbackStarted()
                 // The video's own sound plays alongside the Dolby for a few seconds, then alone.
-                AudioOutput.stopPrimer(after: 3)
+                AudioOutput.stopPrimer(after: 3) { [weak self] in self?.reopenAudioOutput() }
                 self.listener?.playerState(["buffering": false])
                 self.listener?.playerEvent("restart")
             }
@@ -522,8 +524,50 @@ final class AetherPlayer {
         .store(in: &watching)
     }
 
+    /// How long `reopenAudioOutput` holds the video paused. A pause and play by hand was measured to work;
+    /// a shorter one isn't known to.
+    private static let reopenPause: TimeInterval = 0.5
+
+    /**
+     * Sound the Apple TV decodes, over more than 2 channels: the video pauses and plays again once
+     * the Dolby primer has widened the HDMI link, so its player sets its sound output up again on
+     * the wide link instead of keeping the stereo one it started with (see `AudioOutput.startPrimer`).
+     * Measured by hand: the soundbar went from stereo PCM to multichannel PCM. Hidden from the page.
+     */
+    private func reopenAudioOutput() {
+        guard current != nil, !ended, !paused, !reopening, engine.state == .playing,
+              let audio = activeAudio else { return }
+        let decoded = engine.audioDelivery == .decoded
+            || (engine.audioDelivery == .bridged && engine.loadedAudioIsLossless)
+        var sent = audio.channels
+        if let limit = shaping.maxChannels { sent = min(sent, limit) }
+        guard decoded, sent > 2 else { return }
+        reopening = true
+        let generation = generation
+        engine.pause()
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.reopenPause) { [weak self] in
+            guard let self else { return }
+            guard generation == self.generation, self.current != nil, !self.ended else {
+                self.reopening = false
+                return
+            }
+            // Paused from the page meanwhile: it stays paused, and the page already knows.
+            if !self.paused { self.engine.play() }
+            AudioOutput.notePrimer("then paused and played the video, \(audio.channels) ch \(audio.codec)")
+            // The play's own state change arrives after this call.
+            DispatchQueue.main.async { self.reopening = false }
+        }
+    }
+
     private func stateChanged(_ state: PlaybackState) {
         guard current != nil, !ended else { return }
+        // `reopenAudioOutput`'s own pause and play.
+        if reopening {
+            switch state {
+            case .paused, .playing: return
+            default: break
+            }
+        }
         switch state {
         case .playing:
             listener?.playerState(["paused": false])
@@ -746,7 +790,7 @@ final class AetherPlayer {
                 try await self.engine.reloadAtCurrentPosition()
                 guard generation == self.generation else { return }
                 if self.paused { self.engine.pause() } else { self.engine.play() }
-                AudioOutput.stopPrimer(after: 3)
+                AudioOutput.stopPrimer(after: 3) { [weak self] in self?.reopenAudioOutput() }
             } catch is CancellationError {
             } catch {
                 guard generation == self.generation else { return }

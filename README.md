@@ -96,8 +96,13 @@ on a Samsung TV with a Samsung HW-Q990F soundbar on eARC:
   loaded didn't do it: the load's silence let the link fall back to stereo. So silent Dolby
   Digital Plus Atmos (AetherEngine's `silent-atmos.mp4`) plays through every load, a return from
   the background and an audio track switch, and stops a few seconds after the video's own sound
-  has started, so the two overlap as in Infuse. The app menu's Dolby primer line says whether it
-  played. Its route reads 2 channels either way, so only the soundbar shows whether it worked.
+  has started, so the two overlap as in Infuse. That widens the link (the soundbar shows Dolby),
+  but the video's player has set its sound output up at stereo by then and keeps it: the soundbar
+  showed stereo PCM until a pause and play, then multichannel PCM. So once the Dolby stops, a video
+  whose sound the Apple TV decodes over more than 2 channels pauses for half a second and plays
+  again, which the page isn't told about. The app menu's Dolby primer line says whether it played
+  and whether the video was paused and played. Its route reads 2 channels either way, so only the
+  soundbar shows whether it worked.
 - Picture in picture closes on an HDR or frame-rate video: the window opens, the video goes back
   full screen, then the TV goes to the Home screen.
 

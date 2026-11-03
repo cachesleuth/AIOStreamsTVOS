@@ -106,6 +106,11 @@ enum AudioOutput {
      * until the video's own sound has started (`stopPrimer`), and the two overlap. The stream is
      * AetherEngine's (`silent-atmos.mp4`, written bit by bit by its
      * `Scripts/make-silent-atmos.swift`) and decodes to digital silence. Main thread.
+     *
+     * The overlap widens the link (the soundbar shows Dolby, then PCM), but the video's player set
+     * its output up at stereo before that, and keeps it: the soundbar stays at stereo PCM until a
+     * pause and play, which sets the output up again on the wide link. So the player pauses and
+     * resumes the video once the primer has stopped (`AetherPlayer.reopenAudioOutput`).
      */
     static func startPrimer() {
         guard routeIsHDMI,
@@ -132,14 +137,22 @@ enum AudioOutput {
     }
 
     /// The video's sound has started (or the video is gone): the primer stops `after` seconds,
-    /// so the decoded sound takes over the link while the Dolby still holds it.
-    static func stopPrimer(after: TimeInterval) {
+    /// so the decoded sound takes over the link while the Dolby still holds it. `then` runs once
+    /// it has stopped, unless another start or stop came first.
+    static func stopPrimer(after: TimeInterval, then: (() -> Void)? = nil) {
         guard primer != nil else { return }
         primerTurn += 1
         let turn = primerTurn
         DispatchQueue.main.asyncAfter(deadline: .now() + after) {
-            if turn == primerTurn { finishPrimer(nil) }
+            guard turn == primerTurn else { return }
+            finishPrimer(nil)
+            then?()
         }
+    }
+
+    /// Adds what followed the primer to its line in the app menu.
+    static func notePrimer(_ note: String) {
+        lastPrime = (lastPrime ?? "") + "; " + note
     }
 
     private static func finishPrimer(_ why: String?) {
