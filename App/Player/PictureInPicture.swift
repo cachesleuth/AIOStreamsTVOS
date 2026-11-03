@@ -35,6 +35,10 @@ final class PictureInPicture: NSObject {
     private var restoring = false
     /// The app went to the background with the window showing.
     private var left = false
+    /// The app has been in the background since it was last active. Losing focus alone doesn't count:
+    /// tvOS takes it from the app and gives it back as the window settles and when it ignores a Home
+    /// screen ask, and treating that as the user coming back closed the window it had just opened.
+    private var wentAway = false
 
     /// The window couldn't start, with why, for the user.
     var failed: (String) -> Void = { _ in }
@@ -213,15 +217,31 @@ final class PictureInPicture: NSObject {
     private static let allowTime: TimeInterval = 4
 
     func appWillResignActive() {
-        if active { left = true }
+        if active { step("app lost focus") }
     }
 
-    /// Back in the app, the video comes back with it.
+    /// The app is on the Home screen or behind another app.
+    func appDidEnterBackground() {
+        wentAway = true
+        if active {
+            left = true
+            step("app in the background, window showing")
+        }
+    }
+
+    /// Back in the app from the background, the video comes back with it. Focus coming back without
+    /// the app having left, as when tvOS ignores the Home screen ask, keeps the window as it is.
     func appDidBecomeActive() {
+        guard wentAway else {
+            if active { step("focus back without leaving the app; window kept") }
+            return
+        }
+        wentAway = false
         // The window closed while the app was away: the video's mode comes back with the app.
         if !active, !left { putBackDisplayMode() }
         guard left else { return }
         left = false
+        step("back in the app; video back full screen")
         stop()
     }
 

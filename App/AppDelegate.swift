@@ -69,6 +69,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
      * hands the answer on for the Top Shelf. A few seconds more awake let it.
      */
     func sceneDidEnterBackground(_ scene: UIScene) {
+        main.appDidEnterBackground()
         endBackgroundTask()
         backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "top-shelf") { [weak self] in
             self?.endBackgroundTask()
