@@ -110,7 +110,7 @@ enum AudioOutput {
      * The overlap widens the link (the soundbar shows Dolby, then PCM), but the video's player set
      * its output up at stereo before that, and keeps it: the soundbar stays at stereo PCM until a
      * pause and play, which sets the output up again on the wide link. So the player pauses and
-     * resumes the video once the primer has stopped (`AetherPlayer.reopenAudioOutput`).
+     * plays the video while the primer still plays, then stops it (`AetherPlayer.settleAudio`).
      */
     static func startPrimer() {
         guard routeIsHDMI,
@@ -121,6 +121,7 @@ enum AudioOutput {
         if primer == nil {
             primerBefore = routeSummary
             primerPlayed = false
+            primerNotes = []
             let player = AVQueuePlayer()
             player.automaticallyWaitsToMinimizeStalling = false
             primer = player
@@ -137,22 +138,26 @@ enum AudioOutput {
     }
 
     /// The video's sound has started (or the video is gone): the primer stops `after` seconds,
-    /// so the decoded sound takes over the link while the Dolby still holds it. `then` runs once
-    /// it has stopped, unless another start or stop came first.
-    static func stopPrimer(after: TimeInterval, then: (() -> Void)? = nil) {
+    /// so the decoded sound takes over the link while the Dolby still holds it.
+    static func stopPrimer(after: TimeInterval) {
         guard primer != nil else { return }
         primerTurn += 1
         let turn = primerTurn
         DispatchQueue.main.asyncAfter(deadline: .now() + after) {
-            guard turn == primerTurn else { return }
-            finishPrimer(nil)
-            then?()
+            if turn == primerTurn { finishPrimer(nil) }
         }
     }
 
-    /// Adds what followed the primer to its line in the app menu.
+    /// What happened while the primer played, for its line in the app menu once it stops.
+    private static var primerNotes: [String] = []
+
+    /// Adds to the primer's line in the app menu: kept until it stops if it still plays.
     static func notePrimer(_ note: String) {
-        lastPrime = (lastPrime ?? "") + "; " + note
+        if primer != nil {
+            primerNotes.append(note)
+        } else {
+            lastPrime = (lastPrime ?? "") + "; " + note
+        }
     }
 
     private static func finishPrimer(_ why: String?) {
@@ -168,6 +173,8 @@ enum AudioOutput {
         var outcome = primerPlayed ? "played" : "never played"
         if let error { outcome += " (\(error.localizedDescription))" }
         if let why { outcome += ", \(why)" }
+        for note in primerNotes { outcome += ", \(note)" }
+        primerNotes = []
         outcome += "; before: \(primerBefore); after: \(routeSummary)"
         lastPrime = outcome
         NSLog("[audio] Dolby primer: %@", outcome)
