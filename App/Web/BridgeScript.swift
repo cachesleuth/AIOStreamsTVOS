@@ -63,11 +63,16 @@ enum BridgeScript {
   let lastDown = 0;
   const HELD_LASTS = 250;
   const holding = () => held && performance.now() - lastDown < HELD_LASTS;
+  // When the last slide that is still running ends, so the artwork sweep below can wait for it.
+  let slidingUntil = 0;
   try {
     const animate = Element.prototype.animate;
     Element.prototype.animate = function (keyframes, options) {
-      if (holding() && this.hasAttribute && this.hasAttribute('data-glide-layer'))
-        return animate.call(this, keyframes, { duration: 0 });
+      const glide = !!(this.hasAttribute && this.hasAttribute('data-glide-layer'));
+      if (glide && holding()) return animate.call(this, keyframes, { duration: 0 });
+      const duration = typeof options === 'number' ? options : options?.duration;
+      if (glide && typeof duration === 'number' && duration > 0)
+        slidingUntil = Math.max(slidingUntil, performance.now() + duration);
       return animate.call(this, keyframes, options);
     };
   } catch {}
@@ -127,17 +132,26 @@ enum BridgeScript {
       }
     }
   };
+  /*
+   * A single press slides the page for 250 ms. A sweep in the frame after the
+   * press, or one landing as the slide ends, measures every card and swaps
+   * pictures while it runs, so it waits until the slide is over. Presses that
+   * keep a slide running still get a sweep at least once a second, for memory.
+   */
+  const SLIDE_SETTLE = 50;
+  const SWEEP_AT_LEAST = 1000;
   let lastSweep = 0;
   let sweepTimer = 0;
   const soonSweep = () => {
     const now = performance.now();
+    const sliding = now < slidingUntil && now - lastSweep < SWEEP_AT_LEAST;
     clearTimeout(sweepTimer);
     // The trailing one catches where a scroll came to rest.
     sweepTimer = setTimeout(() => {
       lastSweep = performance.now();
       sweep();
-    }, SWEEP_EVERY);
-    if (now - lastSweep < SWEEP_EVERY) return;
+    }, sliding ? Math.max(SWEEP_EVERY, slidingUntil - now + SLIDE_SETTLE) : SWEEP_EVERY);
+    if (sliding || now - lastSweep < SWEEP_EVERY) return;
     lastSweep = now;
     // Not handed to the frame as it is, which would pass the frame's time as `releaseAt`.
     requestAnimationFrame(() => sweep());
