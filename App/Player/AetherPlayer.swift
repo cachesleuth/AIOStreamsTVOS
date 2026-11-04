@@ -24,9 +24,7 @@ protocol PlayerListener: AnyObject {
  * - E-AC-3 with Atmos (JOC), the streaming services' Atmos, is copied into
  *   the stream AVPlayer plays untouched, and tvOS sends it to the receiver as
  *   Dolby MAT. That needs the HDMI route at full width, so the audio session
- *   is activated per video (`AudioOutput`). On the engine's software player
- *   the compressed stream goes to tvOS's audio renderer instead
- *   (`objectAudioRendering`), which decodes the Atmos.
+ *   is activated per video (`AudioOutput`).
  * - TrueHD and DTS-HD can't be bitstreamed by an Apple TV, so they're decoded
  *   to multichannel PCM, up to 7.1, as Infuse does. TrueHD Atmos and DTS:X
  *   play as their 7.1, without objects or heights.
@@ -178,17 +176,10 @@ final class AetherPlayer {
         }
         // TrueHD, DTS and DTS-HD can't leave an Apple TV as a bitstream, so they're decoded and reach
         // the receiver as multichannel PCM, up to 7.1, as Infuse plays them: TrueHD Atmos and DTS:X
-        // as their 7.1, without the objects and heights. A TV's plain ARC takes only stereo PCM, so a
-        // soundbar behind one gets stereo; `.surroundCompat` would give it Dolby Digital Plus 5.1
-        // instead, lossy. E-AC-3 and AC-3 are copied on the AVPlayer route.
+        // as their 7.1, without the objects and heights (`objectAudioRendering` stays off). A TV's
+        // plain ARC takes only stereo PCM, so a soundbar behind one gets stereo; `.surroundCompat`
+        // would give it Dolby Digital Plus 5.1 instead, lossy. E-AC-3 and AC-3 are copied either way.
         options.audioBridgeMode = .lossless
-        // For E-AC-3 Atmos on the engine's software player (AV1, VP9, interlaced H.264, Hardware
-        // decoding off): it hands the JOC stream to tvOS's renderer compressed, so tvOS decodes the
-        // Atmos, where it would otherwise decode the 5.1 core to PCM. The layout is unused there (the
-        // stream's dec3 box carries it). The same setting renders TrueHD Atmos and DTS:X objects into
-        // that layout, but only in a build with the `TrueHDObjectAudio` / `DTSXObjectAudio` traits,
-        // which `Packages/AetherHost` leaves off: turning one on there would start rendering them.
-        options.objectAudioRendering = .render(.l512)
         options.audioShaping = shaping
         options.audioDelaySeconds = settings.audioDelayMs / 1000
         if !settings.hardwareDecoding { options.preferredDecodePath = .software }

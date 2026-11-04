@@ -63,11 +63,9 @@ PCM and never Atmos.
   over HDMI or eARC; a soundbar behind a TV's plain ARC gets stereo.
 - **What turns Atmos off**: the page's Audio channels set to Stereo or 5.1 (the engine decodes the
   sound to fit), and any output but HDMI, which alone carries Dolby MAT: Bluetooth gets a stereo
-  mix, AirPods a spatial render.
-- **Video the engine decodes itself** (AV1, which no Apple TV decodes in hardware, VP9, interlaced
-  H.264, or anything with Hardware decoding off) plays on its software player. That hands an
-  E-AC-3 Atmos track to tvOS's audio renderer still compressed (`objectAudioRendering`), so it
-  stays Atmos, except on live streams, which decode to the 5.1 core.
+  mix, AirPods a spatial render. So does video the engine decodes itself (AV1, which no Apple TV
+  decodes in hardware, VP9, or anything with Hardware decoding off): it plays an E-AC-3 Atmos
+  track's 5.1 or 7.1 bed as PCM.
 - **The audio session** is only activated when a video starts. Activating it at launch, as the mpv
   build did, fixes the HDMI route at what the link reported then, which with Continuous Audio
   Connection off is 2 channels (AetherEngine#24). With it off, the link is still at 2 channels
@@ -355,11 +353,10 @@ open AIOStreamsTV.xcodeproj     # Xcode fetches AetherEngine and its FFmpeg buil
 ```
 
 The engine is pinned to one commit in `Packages/AetherHost/Package.swift`: upstream AetherEngine 7.56.0
-plus two fixes on the app's fork ([mickey2266/AetherEngine](https://github.com/mickey2266/AetherEngine),
-branch `aiostreams-7.56`) for the engine's software player, which plays interlaced H.264 among others.
-It labels its 7.1 as CoreAudio's WAVE_7_1, so the side and rear surrounds play from their own speakers
-instead of each other's. And it no longer loops its silent Atmos stream beside the E-AC-3 Atmos it hands
-to tvOS compressed, which made that play nothing. Lossless surround (TrueHD, DTS-HD) reaches AVPlayer as FLAC. Its FFmpeg comes as
+plus one fix on the app's fork ([mickey2266/AetherEngine](https://github.com/mickey2266/AetherEngine),
+branch `aiostreams-7.56`): the engine's software player, which plays interlaced H.264 among others,
+labels its 7.1 as CoreAudio's WAVE_7_1, so the side and rear surrounds play from their own speakers
+instead of each other's. Lossless surround (TrueHD, DTS-HD) reaches AVPlayer as FLAC. Its FFmpeg comes as
 dynamic frameworks that Xcode embeds in the app; nothing else in the app may bring an FFmpeg of its
 own, or it takes the engine's symbols.
 
