@@ -18,6 +18,8 @@ import PackageDescription
  * Vision dual layer) stay off: the app plays TrueHD and DTS-HD as 7.1 PCM, as
  * Infuse does. To turn one on, add `traits: [...]` to the dependency here;
  * XcodeGen can't set a package's traits, which is why this package exists.
+ * The app sets `objectAudioRendering` (for E-AC-3 Atmos on the software
+ * player), so turning on either audio trait starts rendering its objects.
  */
 let package = Package(
     name: "AetherHost",

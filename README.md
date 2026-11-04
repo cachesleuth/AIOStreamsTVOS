@@ -63,9 +63,11 @@ PCM and never Atmos.
   over HDMI or eARC; a soundbar behind a TV's plain ARC gets stereo.
 - **What turns Atmos off**: the page's Audio channels set to Stereo or 5.1 (the engine decodes the
   sound to fit), and any output but HDMI, which alone carries Dolby MAT: Bluetooth gets a stereo
-  mix, AirPods a spatial render. So does video the engine decodes itself (AV1, which no Apple TV
-  decodes in hardware, VP9, or anything with Hardware decoding off): it plays an E-AC-3 Atmos
-  track's 5.1 or 7.1 bed as PCM.
+  mix, AirPods a spatial render.
+- **Video the engine decodes itself** (AV1, which no Apple TV decodes in hardware, VP9, interlaced
+  H.264, or anything with Hardware decoding off) plays on its software player. That hands an
+  E-AC-3 Atmos track to tvOS's audio renderer still compressed (`objectAudioRendering`), so it
+  stays Atmos, except on live streams, which decode to the 5.1 core.
 - **The audio session** is only activated when a video starts. Activating it at launch, as the mpv
   build did, fixes the HDMI route at what the link reported then, which with Continuous Audio
   Connection off is 2 channels (AetherEngine#24). With it off, the link is still at 2 channels
