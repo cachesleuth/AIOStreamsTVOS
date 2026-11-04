@@ -15,23 +15,24 @@ index 94579d10..6bd5be9a 100644
        const invite = parseInvite(raw);
        return invite ? { kind: 'party', invite } : null;
 diff --git a/packages/web/src/lib/paths.ts b/packages/web/src/lib/paths.ts
-index 104d6658..ba5938ed 100644
+index 104d6658..21eca828 100644
 --- a/packages/web/src/lib/paths.ts
 +++ b/packages/web/src/lib/paths.ts
-@@ -35,6 +35,7 @@ export const to = {
+@@ -35,6 +35,8 @@ export const to = {
      `/play/${itemId}?source=${sourceId}${startMs ? `&start=${Math.round(startMs)}` : ''}${playlist ? `&playlist=${playlist}` : ''}`,
    trailer: (itemId: string, index = 0) =>
      `/play/trailer/${itemId}${index ? `?trailer=${index}` : ''}`,
-+  testVideo: (url: string) => `/test-video?url=${encodeURIComponent(url)}`,
++  testVideo: (url: string) =>
++    `/play/test-video?url=${encodeURIComponent(url)}`,
  };
  
  /** An episode has no page of its own; it opens its show at its season. */
 diff --git a/packages/web/src/pages/test-video.tsx b/packages/web/src/pages/test-video.tsx
 new file mode 100644
-index 00000000..498a9599
+index 00000000..98f7361a
 --- /dev/null
 +++ b/packages/web/src/pages/test-video.tsx
-@@ -0,0 +1,163 @@
+@@ -0,0 +1,162 @@
 +import { t } from '@lingui/core/macro';
 +import { Trans } from '@lingui/react/macro';
 +import React from 'react';
@@ -158,7 +159,6 @@ index 00000000..498a9599
 +          player={player}
 +          segments={null}
 +          onBack={onBack}
-+          caption={url}
 +        />
 +      )}
 +    </div>
@@ -196,7 +196,7 @@ index 00000000..498a9599
 +  );
 +}
 diff --git a/packages/web/src/router.tsx b/packages/web/src/router.tsx
-index 5a9f72f7..398d76b3 100644
+index 5a9f72f7..e7964ab1 100644
 --- a/packages/web/src/router.tsx
 +++ b/packages/web/src/router.tsx
 @@ -21,6 +21,7 @@ import { HistoryPage } from './pages/history';
@@ -207,14 +207,15 @@ index 5a9f72f7..398d76b3 100644
  import { Button } from '@aiostreams/ui/button';
  import { LuffyError } from '@aiostreams/ui/shared/luffy-error';
  import { SettingsPage } from './pages/settings';
-@@ -208,6 +209,22 @@ const trailerRoute = createRoute({
+@@ -208,6 +209,23 @@ const trailerRoute = createRoute({
    component: TrailerRouteView,
  });
  
 +/** A bare http(s) link in the player, for the Apple TV app's test videos. */
 +const testVideoRoute = createRoute({
 +  getParentRoute: () => shellRoute,
-+  path: '/test-video',
++  // Under /play/, which the layout draws full screen outside the page frame, as a trailer.
++  path: '/play/test-video',
 +  validateSearch: (search: Record<string, unknown>) => ({
 +    url: search.url == null ? '' : String(search.url),
 +    title: search.title == null ? '' : String(search.title),
@@ -230,7 +231,7 @@ index 5a9f72f7..398d76b3 100644
  function TrailerRouteView(): React.ReactElement {
    const { itemId } = trailerRoute.useParams();
    const { trailer } = trailerRoute.useSearch();
-@@ -242,6 +259,7 @@ const routeTree = rootRoute.addChildren([
+@@ -242,6 +260,7 @@ const routeTree = rootRoute.addChildren([
      personRoute,
      playRoute,
      trailerRoute,
