@@ -69,15 +69,21 @@ final class MainViewController: UIViewController, RemoteReceiver {
             self?.connected = false
             self?.showStatus("The page couldn't load.\n\(error)\n\nHold Play/Pause for options.")
         }
-        web.onProcessEnded = { [weak self] url in
+        web.onProcessEnded = { [weak self] url, reason in
             guard let self else { return }
-            // Most often memory; the page loads again where it was.
-            MemoryLog.pageEnded(playing: self.player?.playing == true)
+            // The page loads again where it was.
+            MemoryLog.pageEnded(playing: self.player?.playing == true, reason: reason)
             self.loadPage(at: url)
-            self.flashStatus("The page ran out of memory and reloaded.")
+            self.flashStatus(reason.rawValue == 0
+                ? "The page ran out of memory and reloaded."
+                : "The page stopped (\(MemoryLog.cause(reason))) and reloaded.")
         }
         MemoryLog.webMB = { [weak web] in
             guard let mb = web?.webProcessMB, mb >= 0 else { return nil }
+            return mb
+        }
+        MemoryLog.gpuMB = { [weak web] in
+            guard let mb = web?.gpuProcessMB, mb >= 0 else { return nil }
             return mb
         }
         MemoryLog.startSampling()

@@ -63,8 +63,12 @@ enum MemoryLog {
 
     /// The page's web process in MB, or nil where WebKit doesn't say.
     static var webMB: () -> Int? = { nil }
+    /// WebKit's graphics process in MB, which holds the page's decoded pictures and layers; nil where WebKit doesn't say.
+    static var gpuMB: () -> Int? = { nil }
     private static var lastWebMB: Int?
     private static var peakWebMB: Int?
+    private static var lastGpuMB: Int?
+    private static var peakGpuMB: Int?
     private static var sampler: Timer?
 
     /// Samples the web process from now on, for its size before it ends and its largest.
@@ -76,9 +80,14 @@ enum MemoryLog {
     }
 
     private static func sample() {
-        guard let mb = webMB() else { return }
-        lastWebMB = mb
-        peakWebMB = max(peakWebMB ?? 0, mb)
+        if let mb = webMB() {
+            lastWebMB = mb
+            peakWebMB = max(peakWebMB ?? 0, mb)
+        }
+        if let mb = gpuMB() {
+            lastGpuMB = mb
+            peakGpuMB = max(peakGpuMB ?? 0, mb)
+        }
     }
 
     /// This app's own memory, as tvOS counts it against the app's limit.
@@ -98,14 +107,30 @@ enum MemoryLog {
 
     static var now: String {
         let page = webMB().map { "page \($0) MB, " } ?? ""
-        return page + "app \(appMB.map { "\($0) MB" } ?? "?"), \(leftMB) MB left"
+        let gpu = gpuMB().map { "WebKit graphics \($0) MB, " } ?? ""
+        return page + gpu + "app \(appMB.map { "\($0) MB" } ?? "?"), \(leftMB) MB left"
     }
 
-    static func pageEnded(playing: Bool) {
+    /// What ended the page's web process, from WebKit's reason (`AIOPageEnd`).
+    static func cause(_ reason: AIOPageEnd) -> String {
+        switch reason.rawValue {
+        case 0: return "out of memory"
+        case 1: return "too much processor time"
+        case 2: return "closed by WebKit"
+        case 3: return "a crash or hang"
+        case 4: return "WebKit's graphics process crashing repeatedly"
+        default: return "no reason given"
+        }
+    }
+
+    static func pageEnded(playing: Bool, reason: AIOPageEnd) {
         pageEnds += 1
-        let before = lastWebMB.map { "; page \($0) MB at most 5 s before" } ?? ""
+        var before = lastWebMB.map { "; page \($0) MB" } ?? ""
+        if let gpu = lastGpuMB { before += ", WebKit graphics \(gpu) MB" }
+        if !before.isEmpty { before += " at most 5 s before" }
         lastWebMB = nil
-        note("page's web process ended \(playing ? "with a video loaded" : "while browsing")\(before)")
+        lastGpuMB = nil
+        note("page's web process ended (\(cause(reason))) \(playing ? "with a video loaded" : "while browsing")\(before)")
     }
 
     static func warning(playing: Bool) {
@@ -122,7 +147,8 @@ enum MemoryLog {
 
     /// For the app menu and the diagnostics.
     static var report: [String] {
-        let peak = peakWebMB.map { ", the page at most \($0) MB" } ?? ""
+        var peak = peakWebMB.map { ", the page at most \($0) MB" } ?? ""
+        if let gpu = peakGpuMB { peak += ", WebKit graphics at most \(gpu) MB" }
         return ["Memory: \(now); the page reloaded \(pageEnds) times since launch\(peak)"] + lines
     }
 }

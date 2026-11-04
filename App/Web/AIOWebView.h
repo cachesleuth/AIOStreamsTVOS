@@ -2,6 +2,20 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+/** Why the page's web process ended, as WebKit gives it (`_WKProcessTerminationReason`). */
+typedef NS_ENUM(NSInteger, AIOPageEnd) {
+    /** WebKit didn't say (an older WebKit calling only the public delegate method). */
+    AIOPageEndUnknown = -1,
+    AIOPageEndMemory = 0,
+    AIOPageEndCPU = 1,
+    /** Asked for by WebKit's client side, an idle exit or a process swap. */
+    AIOPageEndRequested = 2,
+    /** A crash, a hang, or the network or graphics process asking for it. */
+    AIOPageEndCrash = 3,
+    /** WebKit's graphics (GPU) process crashed too many times. */
+    AIOPageEndGPUCrashes = 4,
+};
+
 /**
  * A WKWebView made at runtime. tvOS ships WebKit but leaves it out of the SDK,
  * so every call goes through the Objective-C runtime. Fine for a sideloaded
@@ -18,10 +32,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) void (^onLoadFinished)(void);
 @property (nonatomic, copy, nullable) void (^onLoadFailed)(NSString *error);
 /**
- * The page's process ended (most often for memory). The handler loads the page
- * again, at `url`, where it was; without one, the view loads it itself.
+ * The page's process ended, for `reason`. The handler loads the page again, at
+ * `url`, where it was; without one, the view loads it itself.
  */
-@property (nonatomic, copy, nullable) void (^onProcessEnded)(NSURL *_Nullable url);
+@property (nonatomic, copy, nullable) void (^onProcessEnded)(NSURL *_Nullable url, AIOPageEnd reason);
 /** A link to anywhere but the app's own pages, such as an external player's. */
 @property (nonatomic, copy, nullable) void (^onOpenURL)(NSURL *url);
 /** A file the app served, or failed to. */
@@ -51,6 +65,12 @@ NS_ASSUME_NONNULL_BEGIN
  * measure it itself; asked of WebKit's private process list.
  */
 @property (nonatomic, readonly) NSInteger webProcessMB;
+/**
+ * WebKit's graphics process's memory in MB, or -1 where WebKit doesn't say.
+ * It draws the page and holds its decoded pictures and layers, which the web
+ * process's figure leaves out.
+ */
+@property (nonatomic, readonly) NSInteger gpuProcessMB;
 
 @end
 

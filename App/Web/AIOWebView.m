@@ -93,7 +93,7 @@ static NSString *AIOMimeType(NSString *extension) {
 - (void)receiveBody:(id)body;
 - (void)navigationFinished;
 - (void)navigationFailed:(NSError *)error;
-- (void)contentProcessEnded;
+- (void)contentProcessEnded:(AIOPageEnd)reason;
 - (void)openURL:(NSURL *)url;
 - (void)served:(NSString *)path status:(NSInteger)status bytes:(NSUInteger)bytes;
 @end
@@ -126,8 +126,14 @@ static NSString *AIOMimeType(NSString *extension) {
     [self.owner navigationFailed:error];
 }
 
+/** WebKit calls this one, with the reason, in place of the public one below when the delegate has it. */
+- (void)_webView:(id)webView webContentProcessDidTerminateWithReason:(NSInteger)reason {
+    AIOPageEnd known = reason >= AIOPageEndMemory && reason <= AIOPageEndGPUCrashes ? (AIOPageEnd)reason : AIOPageEndUnknown;
+    [self.owner contentProcessEnded:known];
+}
+
 - (void)webViewWebContentProcessDidTerminate:(id)webView {
-    [self.owner contentProcessEnded];
+    [self.owner contentProcessEnded:AIOPageEndUnknown];
 }
 
 /** The app's pages and what they embed load; a link anywhere else goes to the system. */
@@ -414,13 +420,13 @@ static NSString *AIOMimeType(NSString *extension) {
     if (self.onLoadFailed) self.onLoadFailed(error.localizedDescription ?: @"The page could not load.");
 }
 
-- (void)contentProcessEnded {
+- (void)contentProcessEnded:(AIOPageEnd)reason {
     // Where the page was, rather than its start.
     NSURL *current = AIOSend0(self.webView, @"URL");
     NSURL *url = current ?: self.lastURL;
     // The owner loads it, so the start script it sets carries the storage as it is now.
     if (self.onProcessEnded) {
-        self.onProcessEnded(url);
+        self.onProcessEnded(url, reason);
         return;
     }
     if (url) AIOSendObject(self.webView, @"loadRequest:", [NSURLRequest requestWithURL:url]);
@@ -447,6 +453,14 @@ static NSString *AIOMimeType(NSString *extension) {
         any = YES;
     }
     return any ? (NSInteger)(largest >> 20) : -1;
+}
+
+- (NSInteger)gpuProcessMB {
+    id info = AIOSend0(NSClassFromString(@"WKProcessPool"), @"_gpuProcessInfo");
+    SEL footprintSel = NSSelectorFromString(@"physicalFootprint");
+    if (!info || ![info respondsToSelector:footprintSel]) return -1;
+    size_t bytes = ((size_t (*)(id, SEL))objc_msgSend)(info, footprintSel);
+    return (NSInteger)(bytes >> 20);
 }
 
 - (void)openURL:(NSURL *)url {
