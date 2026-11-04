@@ -49,6 +49,28 @@ enum BridgeScript {
     Object.defineProperty(window, 'devicePixelRatio', { get: () => 1, configurable: true });
   } catch {}
   /*
+   * The page also sizes artwork by the screen against its own width, and
+   * tvOS reports a 4K screen as 3840 wide to a page laid out 1920 wide, so it
+   * still asked for everything at twice the size: a backdrop came as a
+   * 3840x2160 picture, 33 MB decoded. The screen is reported as the page's
+   * own size, so artwork comes at the size it is drawn, up to 1920 wide.
+   */
+  try {
+    const proto = Object.getPrototypeOf(window.screen);
+    const own = (inner, fallback) => () => window[inner] || fallback;
+    for (const [name, inner] of [
+      ['width', 'innerWidth'],
+      ['availWidth', 'innerWidth'],
+      ['height', 'innerHeight'],
+      ['availHeight', 'innerHeight'],
+    ]) {
+      Object.defineProperty(proto, name, {
+        get: own(inner, name.toLowerCase().includes('width') ? 1920 : 1080),
+        configurable: true,
+      });
+    }
+  } catch {}
+  /*
    * On a TV the page eases keyed scrolling by sliding the page, or a row of
    * cards, in nested layers (`data-glide-layer`), one animation per key
    * press. A held key repeats about nine times a second, so scrolling fast
@@ -83,9 +105,26 @@ enum BridgeScript {
    * to draw them again.
    */
   const EFFECTS = false;
+  /*
+   * Test: no layers kept at rest and no pulsing placeholders. With masks and
+   * blur off, the home page was still ended at its limit while its own
+   * pictures came to about 115 MB of the 1.3 GB: the rest most likely
+   * drawing surfaces, a screen-sized layer being about 33 MB at the TV's 2x.
+   * The rotating hero keeps several full-screen backdrops as standing layers
+   * (`will-change`), and rows that are loading show pulsing placeholders,
+   * each animated as a layer of its own. With LAYERS off, nothing asks to
+   * stay a layer and the placeholders hold still. Set it back to true to
+   * keep them.
+   */
+  const LAYERS = false;
   try {
     const rules = [];
-    if (!SLIDES) rules.push('[data-glide-layer]{will-change:auto!important}');
+    if (!LAYERS)
+      rules.push(
+        '*,*::before,*::after{will-change:auto!important}',
+        '.animate-pulse,.UI-Skeleton__root{animation:none!important}'
+      );
+    else if (!SLIDES) rules.push('[data-glide-layer]{will-change:auto!important}');
     if (!EFFECTS)
       rules.push(
         '*,*::before,*::after{filter:none!important;-webkit-backdrop-filter:none!important;' +
