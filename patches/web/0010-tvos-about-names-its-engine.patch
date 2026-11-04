@@ -1,0 +1,84 @@
+diff --git a/packages/web/src/pages/settings/about.tsx b/packages/web/src/pages/settings/about.tsx
+index a8883d58..b83ccf39 100644
+--- a/packages/web/src/pages/settings/about.tsx
++++ b/packages/web/src/pages/settings/about.tsx
+@@ -5,6 +5,7 @@ import { Button } from '@aiostreams/ui/button';
+ import { useSession } from '../../lib/session';
+ import { currentHost } from '../../lib/hosts';
+ import { useShellInfo, type ShellInfo } from '../../lib/hosts/shell';
++import { appleTv } from '../../lib/hosts/shell/bridge';
+ import { serverAddress } from '../../lib/servers';
+ import { useServerInfo } from '../../lib/server-info';
+ import { LicensesSetting } from '../../components/licenses';
+@@ -55,7 +56,12 @@ export function AboutSection() {
+     ...(shell
+       ? ([
+           [
+-            shell.platform === 'android' ? t`Android app` : t`Desktop app`,
++            appleTv()
++              ? // eslint-disable-next-line lingui/no-unlocalized-strings -- the Apple TV app's own build, untranslated
++                'tvOS app'
++              : shell.platform === 'android'
++                ? t`Android app`
++                : t`Desktop app`,
+             shell.app,
+           ],
+           ...(shell.player && !shell.mpv
+@@ -143,7 +149,8 @@ function credits(
+       help: t`The API this app speaks.`,
+       url: 'https://jellyfin.org',
+     },
+-    ...(shell
++    ...(shell && appleTv() ? appleTvCredits() : []),
++    ...(shell && !appleTv()
+       ? [
+           { name: 'mpv', help: t`Plays the video.`, url: 'https://mpv.io' },
+           {
+@@ -164,3 +171,47 @@ function credits(
+       : []),
+   ];
+ }
++
++/*
++ * What plays and decodes video in the Apple TV app, which plays with AetherEngine rather than mpv.
++ * In English only: the app's own build, with no catalog entries for these.
++ */
++/* eslint-disable lingui/no-unlocalized-strings -- the Apple TV app's own build, untranslated */
++const appleTvCredits = (): { name: string; help: string; url: string }[] => [
++  {
++    name: 'AetherEngine',
++    help: 'Plays the video.',
++    url: 'https://github.com/superuser404notfound/AetherEngine',
++  },
++  {
++    name: 'FFmpeg',
++    help: 'Reads every file and decodes what the Apple TV has no decoder for.',
++    url: 'https://ffmpeg.org',
++  },
++  {
++    name: 'dav1d',
++    help: 'Decodes AV1, inside FFmpeg.',
++    url: 'https://code.videolan.org/videolan/dav1d',
++  },
++  {
++    name: 'libdovi',
++    help: 'Reads and converts the Dolby Vision metadata.',
++    url: 'https://github.com/quietvoid/dovi_tool',
++  },
++  {
++    name: 'libzvbi',
++    help: 'Decodes teletext subtitles, inside FFmpeg.',
++    url: 'https://github.com/zapping-vbi/zvbi',
++  },
++  {
++    name: 'libass',
++    help: 'Draws ASS and SSA subtitles with their styles.',
++    url: 'https://github.com/libass/libass',
++  },
++  {
++    name: 'VideoToolbox',
++    help: "Apple's hardware decoder, for HEVC, H.264 and the Apple TV's other formats.",
++    url: 'https://developer.apple.com/documentation/videotoolbox',
++  },
++];
++/* eslint-enable lingui/no-unlocalized-strings */

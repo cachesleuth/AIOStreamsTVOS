@@ -133,7 +133,8 @@ enum AppAnswers {
     static func appInfo() -> Message {
         [
             "type": "app-info",
-            "app": "\(Identity.version) (tvOS)",
+            // About shows it as the "tvOS app" (patches/web/0010).
+            "app": Identity.version,
             "platform": "android",
             "mpv": NSNull(),
             "ffmpeg": "FFmpeg in AetherEngine \(AetherPlayer.version)",
@@ -167,17 +168,38 @@ enum AppAnswers {
         return ["type": "diagnostics", "text": lines.joined(separator: "\n")]
     }
 
+    /// What the app ships besides the page, for the page's Licences list. FFmpegBuild bundles dav1d, zimg
+    /// and libzvbi (its README's licence table; libzvbi's GPL files are left out of that build), and
+    /// swift-libass bundles libass with FreeType, FriBidi, HarfBuzz, fontconfig and libpng (its README's
+    /// prebuilt versions).
     static let licenses: Message = [
         "type": "licenses",
         "texts": [
             "GNU Lesser General Public License, version 3, with AetherEngine's Apple Store exception: https://github.com/superuser404notfound/AetherEngine/blob/main/LICENSE",
             "GNU Lesser General Public License, version 2.1: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html",
             "MIT License: https://opensource.org/license/mit",
+            "BSD 2-Clause License: https://opensource.org/license/bsd-2-clause",
+            "WTFPL: https://www.wtfpl.net/about/",
+            "GNU Library General Public License, version 2: https://www.gnu.org/licenses/old-licenses/lgpl-2.0.html",
+            "ISC License: https://opensource.org/license/isc-license-txt",
+            "FreeType License (or GPL-2.0): https://gitlab.freedesktop.org/freetype/freetype/-/blob/master/docs/FTL.TXT",
+            "PNG Reference Library License, version 2: https://github.com/pnggroup/libpng/blob/libpng16/LICENSE",
+            "Fontconfig licence (MIT style): https://gitlab.freedesktop.org/fontconfig/fontconfig/-/blob/main/COPYING",
         ],
         "libraries": [
             ["name": "AetherEngine", "licence": "LGPL-3.0", "url": "https://github.com/superuser404notfound/AetherEngine", "texts": [0]],
-            ["name": "FFmpeg (FFmpegBuild)", "licence": "LGPL-2.1", "url": "https://github.com/superuser404notfound/FFmpegBuild", "texts": [1]],
+            ["name": "FFmpeg (FFmpegBuild)", "licence": "LGPL-2.1-or-later", "url": "https://github.com/superuser404notfound/FFmpegBuild", "texts": [1]],
+            ["name": "dav1d (FFmpegBuild)", "licence": "BSD-2-Clause", "url": "https://code.videolan.org/videolan/dav1d", "texts": [3]],
+            ["name": "zimg (FFmpegBuild)", "licence": "WTFPL", "url": "https://github.com/sekrit-twc/zimg", "texts": [4]],
+            ["name": "libzvbi (FFmpegBuild)", "licence": "LGPL-2.0-or-later", "url": "https://github.com/zapping-vbi/zvbi", "texts": [5, 2]],
             ["name": "libdovi (LibDovi)", "licence": "MIT", "url": "https://github.com/quietvoid/dovi_tool", "texts": [2]],
+            ["name": "swift-libass", "licence": "MIT", "url": "https://github.com/mihai8804858/swift-libass", "texts": [2]],
+            ["name": "libass", "version": "0.17.3", "licence": "ISC", "url": "https://github.com/libass/libass", "texts": [6]],
+            ["name": "FreeType", "version": "2.13.2", "licence": "FTL OR GPL-2.0-or-later", "url": "https://freetype.org", "texts": [7]],
+            ["name": "FriBidi", "version": "1.0.14", "licence": "LGPL-2.1-or-later", "url": "https://github.com/fribidi/fribidi", "texts": [1]],
+            ["name": "HarfBuzz", "version": "8.5.0", "licence": "MIT", "url": "https://github.com/harfbuzz/harfbuzz", "texts": [2]],
+            ["name": "fontconfig", "version": "2.15.0", "url": "https://www.freedesktop.org/wiki/Software/fontconfig/", "texts": [9]],
+            ["name": "libpng", "version": "1.6.43", "licence": "libpng-2.0", "url": "http://www.libpng.org/pub/png/libpng.html", "texts": [8]],
         ] as [Message],
     ]
 

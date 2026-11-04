@@ -295,6 +295,9 @@ Back behaviour and the bundled-player path. It also means:
   - **Engine**.
   - **Pass surround audio through** and its formats: an Apple TV copies Dolby Digital (Plus) and
     decodes the rest to PCM whatever is asked.
+- Settings → About names the app's version **tvOS app**, and its Credits list AetherEngine as the
+  player, with FFmpeg, dav1d, libdovi, libzvbi, libass and VideoToolbox, rather than mpv
+  (`patches/web/0010-tvos-about-names-its-engine.patch`). They're in English only.
 
   **Hardware decoding** always shows, where the page hid it while a stored engine setting said
   ExoPlayer.
