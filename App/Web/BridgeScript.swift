@@ -73,13 +73,30 @@ enum BridgeScript {
    * single presses too. Set it back to true to slide again.
    */
   const SLIDES = false;
-  if (!SLIDES) {
-    try {
+  /*
+   * Test: no masks or filters. The kills come within a second or two of an
+   * item page opening with its version picker (`?pick=`), which draws its
+   * backdrop under two nested `mask-image`s, or, without one, a poster under
+   * `blur-3xl` across most of the screen. WebKit draws masks and filters into
+   * surfaces of their own at the screen's 2x scale. With EFFECTS off, edges
+   * that fade end sharply and blurred washes are plain. Set it back to true
+   * to draw them again.
+   */
+  const EFFECTS = false;
+  try {
+    const rules = [];
+    if (!SLIDES) rules.push('[data-glide-layer]{will-change:auto!important}');
+    if (!EFFECTS)
+      rules.push(
+        '*,*::before,*::after{filter:none!important;-webkit-backdrop-filter:none!important;' +
+          'backdrop-filter:none!important;-webkit-mask-image:none!important;mask-image:none!important}'
+      );
+    if (rules.length) {
       const style = document.createElement('style');
-      style.textContent = '[data-glide-layer]{will-change:auto!important}';
+      style.textContent = rules.join('\n');
       (document.head || document.documentElement).appendChild(style);
-    } catch {}
-  }
+    }
+  } catch {}
   // When the last slide that is still running ends, so the artwork sweep below can wait for it.
   let slidingUntil = 0;
   try {
