@@ -144,7 +144,8 @@ enum MemoryLog {
         String(format: "%.1f s", Date().timeIntervalSince(since))
     }
 
-    static func pageEnded(playing: Bool, reason: AIOPageEnd) {
+    /// `path` is where the page was, such as `/discover`, so the log names the page that ended.
+    static func pageEnded(playing: Bool, reason: AIOPageEnd, at path: String?) {
         pageEnds += 1
         // Whether it was hung as it ended tells a hang from a crash or a memory kill.
         var before = unresponsiveSince.map { "; not responding for \(seconds($0)) before" }
@@ -155,7 +156,8 @@ enum MemoryLog {
         if !sizes.isEmpty { before += "; \(sizes) at most 5 s before" }
         lastWebMB = nil
         lastGpuMB = nil
-        note("page's web process ended (\(cause(reason))) \(playing ? "with a video loaded" : "while browsing")\(before)")
+        let page = path.map { " on \($0)" } ?? ""
+        note("page's web process ended (\(cause(reason)))\(page) \(playing ? "with a video loaded" : "while browsing")\(before)")
     }
 
     static func warning(playing: Bool) {

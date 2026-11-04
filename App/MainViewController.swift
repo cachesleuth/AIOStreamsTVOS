@@ -70,13 +70,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
             self?.showStatus("The page couldn't load.\n\(error)\n\nHold Play/Pause for options.")
         }
         web.onProcessEnded = { [weak self] url, reason in
-            guard let self else { return }
-            // The page loads again where it was.
-            MemoryLog.pageEnded(playing: self.player?.playing == true, reason: reason)
-            self.loadPage(at: url)
-            self.flashStatus(reason.rawValue == 0
-                ? "The page ran out of memory and reloaded."
-                : "The page stopped (\(MemoryLog.cause(reason))) and reloaded.")
+            self?.pageEnded(at: url, reason: reason)
         }
         web.onResponsiveness = { [weak self] responsive in
             MemoryLog.pageResponsive(responsive, playing: self?.player?.playing == true)
@@ -156,6 +150,44 @@ final class MainViewController: UIViewController, RemoteReceiver {
         let ours = url.flatMap { $0.scheme?.lowercased() == WebApp.scheme ? $0 : nil }
         // `loadURL:` in Objective-C; Swift names it `load(_:)`.
         web.load(ours ?? WebApp.startURL)
+    }
+
+    /// When the page's process last ended, newest last, to tell a page that ends again as it loads.
+    private var pageEnds: [Date] = []
+    /// An end this soon after the last one counts as the page failing as it loads.
+    private static let quickEnd: TimeInterval = 30
+
+    /**
+     * The page's process ended. It loads again where it was; ended again within `quickEnd`, it
+     * loads at the start, as the page it was on may be what takes it to its limit as it loads (a
+     * Jetsam report showed 13 ends in 26 s). A third quick end in a row stops reloading, and the
+     * app menu's Reload starts it again.
+     */
+    private func pageEnded(at url: URL?, reason: AIOPageEnd) {
+        let now = Date()
+        pageEnds = pageEnds.filter { now.timeIntervalSince($0) < 10 * Self.quickEnd } + [now]
+        var quick = 0
+        for (earlier, later) in zip(pageEnds.dropLast(), pageEnds.dropFirst()).reversed() {
+            guard later.timeIntervalSince(earlier) < Self.quickEnd else { break }
+            quick += 1
+        }
+        let place = url.map { u in
+            u.path + (u.query.map { "?\($0)" } ?? "") + (u.fragment.map { "#\($0)" } ?? "")
+        }
+        MemoryLog.pageEnded(playing: player?.playing == true, reason: reason, at: place)
+        let cause = reason.rawValue == 0 ? "ran out of memory" : "stopped (\(MemoryLog.cause(reason)))"
+        switch quick {
+        case 0:
+            loadPage(at: url)
+            flashStatus("The page \(cause) and reloaded.")
+        case 1:
+            loadPage()
+            flashStatus("The page \(cause) again as it loaded, so it started over at home.")
+        default:
+            pageEnds = []
+            showStatus("The page \(cause) again as it loaded, even at home, so it wasn't reloaded.\n\n"
+                + "Hold Play/Pause for options, then Reload.")
+        }
     }
 
     private func showStatus(_ text: String) {
