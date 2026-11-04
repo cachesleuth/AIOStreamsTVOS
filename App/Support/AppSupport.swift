@@ -127,6 +127,25 @@ enum MemoryLog {
     /// When WebKit last said the page's process stopped answering, while it still hasn't.
     private static var unresponsiveSince: Date?
 
+    /// The page's own count of what it holds, from its last `tvos-page-stats`, and the largest picture total seen.
+    private static var lastStats: String?
+    private static var peakPictureMB: Int?
+
+    /// A `tvos-page-stats` message: the pictures, canvases and elements the page holds, every 5 s.
+    static func pageStats(_ message: Message) {
+        func int(_ name: String) -> Int { Int(message.number(name) ?? 0) }
+        let pictureMB = int("pictureMB")
+        peakPictureMB = max(peakPictureMB ?? 0, pictureMB)
+        var text = "pictures \(pictureMB) MB in \(int("pictures"))"
+        text += " (artwork \(int("artworkMB")) MB in \(int("artwork")), \(int("released")) released"
+        if let largest = message.text("largest"), !largest.isEmpty { text += ", largest \(largest)" }
+        text += ")"
+        if int("canvases") > 0 { text += ", canvases \(int("canvasMB")) MB in \(int("canvases"))" }
+        if int("videos") > 0 { text += ", \(int("videos")) videos" }
+        text += ", \(int("cards")) cards, \(int("elements")) elements"
+        lastStats = text
+    }
+
     /// WebKit's word that the page's process stopped answering it, or answers again.
     static func pageResponsive(_ responsive: Bool, playing: Bool) {
         let doing = playing ? "with a video loaded" : "while browsing"
@@ -154,8 +173,10 @@ enum MemoryLog {
         var sizes = lastWebMB.map { "page \($0) MB" } ?? ""
         if let gpu = lastGpuMB { sizes += (sizes.isEmpty ? "" : ", ") + "WebKit graphics \(gpu) MB" }
         if !sizes.isEmpty { before += "; \(sizes) at most 5 s before" }
+        if let stats = lastStats { before += "; the page held \(stats) at most 5 s before" }
         lastWebMB = nil
         lastGpuMB = nil
+        lastStats = nil
         let page = path.map { " on \($0)" } ?? ""
         note("page's web process ended (\(cause(reason)))\(page) \(playing ? "with a video loaded" : "while browsing")\(before)")
     }
@@ -176,7 +197,10 @@ enum MemoryLog {
     static var report: [String] {
         var peak = peakWebMB.map { ", the page at most \($0) MB" } ?? ""
         if let gpu = peakGpuMB { peak += ", WebKit graphics at most \(gpu) MB" }
-        return ["Memory: \(now); the page reloaded \(pageEnds) times since launch\(peak)"] + lines
+        if let pictures = peakPictureMB { peak += ", the page's pictures at most \(pictures) MB" }
+        var head = ["Memory: \(now); the page reloaded \(pageEnds) times since launch\(peak)"]
+        if let stats = lastStats { head.append("The page now holds \(stats)") }
+        return head + lines
     }
 }
 

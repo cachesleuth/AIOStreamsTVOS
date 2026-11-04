@@ -514,6 +514,8 @@ final class MainViewController: UIViewController, RemoteReceiver {
             sendToPage(["type": "voice-result", "text": NSNull(), "error": "failed"])
         case "web-error":
             NSLog("[page] %@", message.text("message") ?? "")
+        case "tvos-page-stats":
+            MemoryLog.pageStats(message)
         default:
             // Downloads, keyboard completions and the like have no Apple TV part.
             break

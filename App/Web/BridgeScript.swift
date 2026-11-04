@@ -535,6 +535,73 @@ enum BridgeScript {
     send({ type: 'web-error', message: 'Unhandled rejection: ' + String(e.reason?.stack || e.reason) })
   );
 
+  /*
+   * What the page holds that tvOS counts against its process, as far as the
+   * page can see: every picture loaded (width × height × 4 bytes decoded),
+   * the artwork the sweep released, canvases, videos and how many elements
+   * there are. tvOS's WebKit won't tell the app the process's own size, so
+   * this is sent every few seconds for the app's memory log, to tell
+   * pictures from layers when the process is ended for memory. WebKit may
+   * still keep a picture's decoded copy a while after the page lets go of
+   * it, so it's a floor, not the whole.
+   */
+  const STATS_EVERY = 5000;
+  const pageStats = () => {
+    let pictures = 0;
+    let pictureBytes = 0;
+    let artwork = 0;
+    let artworkBytes = 0;
+    let largest = 0;
+    let largestSize = '';
+    let releasedCount = 0;
+    for (const img of document.images) {
+      if (img.getAttribute('src') === BLANK) {
+        releasedCount++;
+        continue;
+      }
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      if (!img.complete || !w || !h) continue;
+      const bytes = w * h * 4;
+      pictures++;
+      pictureBytes += bytes;
+      if (img.getAttribute('data-ui') === 'artwork') {
+        artwork++;
+        artworkBytes += bytes;
+      }
+      if (bytes > largest) {
+        largest = bytes;
+        largestSize = `${w}x${h}`;
+      }
+    }
+    let canvasBytes = 0;
+    const canvases = document.getElementsByTagName('canvas');
+    for (const c of canvases) canvasBytes += c.width * c.height * 4;
+    const mb = (bytes) => Math.round(bytes / 1048576);
+    return {
+      type: 'tvos-page-stats',
+      path: location.pathname + location.search + location.hash,
+      pictures,
+      pictureMB: mb(pictureBytes),
+      artwork,
+      artworkMB: mb(artworkBytes),
+      largest: largestSize,
+      released: releasedCount,
+      canvases: canvases.length,
+      canvasMB: mb(canvasBytes),
+      videos: document.getElementsByTagName('video').length,
+      elements: document.getElementsByTagName('*').length,
+      cards: document.querySelectorAll('[data-ui="poster-card"]').length,
+    };
+  };
+  try {
+    setInterval(() => {
+      try {
+        send(pageStats());
+      } catch {}
+    }, STATS_EVERY);
+  } catch {}
+
   send({ type: 'hello' });
 })();
 """#
