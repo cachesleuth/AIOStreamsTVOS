@@ -371,7 +371,11 @@ rows and in grids, so a long scroll doesn't keep every card it passed, and save 
 two pages on the device, so one scrolled far doesn't come back with every page at once. A collection
 without landscape art, and each server's card, get their blurred wash drawn once on a tiny canvas
 instead of through a CSS blur, which the TV would otherwise draw again on every frame anything over it
-moves. A patch that no longer applies
+moves. The **Upstream settings watch** workflow (`.github/workflows/upstream-settings-watch.yml`)
+checks upstream every Monday and keeps one issue open while its Android app settings
+(`pages/settings/apps.tsx` and the section list in `pages/settings/index.tsx`) differ from the
+commit in `.github/upstream-watch/settings-baseline`; put upstream's newest commit there once
+you've looked, and the next run closes it. A patch that no longer applies
 to AIOStreams stops the build and is named, to be redone against the new code. The app menu shows the
 web app's commit and how many patches it was built with. Safari's Develop menu on a Mac can inspect
 the page.

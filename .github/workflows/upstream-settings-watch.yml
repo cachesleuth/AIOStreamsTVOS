@@ -1,0 +1,100 @@
+# Tells you when upstream AIOStreams changes its Android app settings, which this app hides
+# (patches/web/0007): a new option there may want hiding, wiring up, or showing on tvOS.
+#
+# It compares the watched files at the commit in .github/upstream-watch/settings-baseline with
+# upstream main, and keeps one open issue (label upstream-settings) with the commits and the diff.
+# Once you've looked at them, put upstream's newest commit in that file and push: the next run
+# closes the issue. Nothing is posted while there is nothing new.
+name: Upstream settings watch
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays, 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  UPSTREAM: https://github.com/Viren070/AIOStreams.git
+  # The Android app section (AndroidSection and what it shows) and the list of settings sections.
+  WATCHED: >-
+    packages/web/src/pages/settings/apps.tsx
+    packages/web/src/pages/settings/index.tsx
+  LABEL: upstream-settings
+  TITLE: Upstream changed the Android app settings
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare with upstream
+        id: compare
+        run: |
+          set -euo pipefail
+          base="$(tr -d '[:space:]' < .github/upstream-watch/settings-baseline)"
+          git clone --quiet --filter=blob:none --no-checkout "$UPSTREAM" upstream
+          head="$(git -C upstream rev-parse HEAD)"
+          if ! git -C upstream cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "::error::The baseline $base is not in upstream's history any more; put a current upstream commit in .github/upstream-watch/settings-baseline."
+            exit 1
+          fi
+          # shellcheck disable=SC2086 # WATCHED is a list of paths
+          if git -C upstream diff --quiet "$base" "$head" -- $WATCHED; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "Upstream AIOStreams changed the files behind its Android app settings since \`${base:0:8}\`, the commit this app's web patches were last checked against. A new option there may want hiding on tvOS (patches/web/0007), wiring up, or leaving as it is."
+            echo
+            echo "Upstream main is at [\`${head:0:8}\`](https://github.com/Viren070/AIOStreams/commit/$head). When you've looked, put \`$head\` in \`.github/upstream-watch/settings-baseline\` and push; the next run closes this issue."
+            echo
+            echo "### Commits"
+            echo
+            # shellcheck disable=SC2086
+            git -C upstream log --format='- [`%h`](https://github.com/Viren070/AIOStreams/commit/%H) %s' "$base..$head" -- $WATCHED
+            echo
+            echo "### Files"
+            echo
+            echo '```'
+            # shellcheck disable=SC2086
+            git -C upstream diff --stat "$base" "$head" -- $WATCHED
+            echo '```'
+            echo
+            echo "### Diff"
+            echo
+            echo '```diff'
+            # An issue body holds 65,536 characters; the diff gets most of that.
+            # shellcheck disable=SC2086
+            git -C upstream diff "$base" "$head" -- $WATCHED | head -c 55000
+            echo
+            echo '```'
+          } > body.md
+
+      - name: Open or update the issue
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh label create "$LABEL" --color FBCA04 --description "Upstream changed settings this app patches" 2>/dev/null || true
+          issue="$(gh issue list --label "$LABEL" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$issue" ]; then
+            gh issue edit "$issue" --body-file body.md
+          else
+            gh issue create --title "$TITLE" --label "$LABEL" --body-file body.md
+          fi
+
+      - name: Close the issue
+        if: steps.compare.outputs.changed == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for issue in $(gh issue list --label "$LABEL" --state open --json number --jq '.[].number'); do
+            gh issue close "$issue" --comment "Nothing new upstream since the baseline in .github/upstream-watch/settings-baseline."
+          done
