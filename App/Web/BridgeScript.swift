@@ -63,13 +63,30 @@ enum BridgeScript {
   let lastDown = 0;
   const HELD_LASTS = 250;
   const holding = () => held && performance.now() - lastDown < HELD_LASTS;
+  /*
+   * Test: no glide layers at all. A Jetsam report showed the page's process
+   * killed at its limit (about 1.35 GB) a couple of minutes after a reload,
+   * nearly all of it outside its own heap, so most likely layer and picture
+   * memory. Each layer is kept composited (`will-change: transform`): three
+   * nested ones the height of the page, and three more the width of every
+   * row. With SLIDES off, those are plain boxes, and every keyed scroll jumps,
+   * single presses too. Set it back to true to slide again.
+   */
+  const SLIDES = false;
+  if (!SLIDES) {
+    try {
+      const style = document.createElement('style');
+      style.textContent = '[data-glide-layer]{will-change:auto!important}';
+      (document.head || document.documentElement).appendChild(style);
+    } catch {}
+  }
   // When the last slide that is still running ends, so the artwork sweep below can wait for it.
   let slidingUntil = 0;
   try {
     const animate = Element.prototype.animate;
     Element.prototype.animate = function (keyframes, options) {
       const glide = !!(this.hasAttribute && this.hasAttribute('data-glide-layer'));
-      if (glide && holding()) return animate.call(this, keyframes, { duration: 0 });
+      if (glide && (!SLIDES || holding())) return animate.call(this, keyframes, { duration: 0 });
       const duration = typeof options === 'number' ? options : options?.duration;
       if (glide && typeof duration === 'number' && duration > 0)
         slidingUntil = Math.max(slidingUntil, performance.now() + duration);
