@@ -79,8 +79,8 @@ PCM and never Atmos.
 For Atmos at all, set **Settings → Video and Audio → Audio Format** to **Auto** (or Change Format →
 **Dolby Atmos**) on the Apple TV.
 
-Keep **Settings → Video and Audio → Audio Format → Continuous Audio Connection** on. With it off,
-on a Samsung TV with a Samsung HW-Q990F soundbar on eARC:
+**Settings → Video and Audio → Audio Format → Continuous Audio Connection** decides how decoded
+sound reaches the receiver. With it off, on a Samsung TV with a Samsung HW-Q990F soundbar on eARC:
 
 - Sound the Apple TV decodes plays as stereo: TrueHD and DTS-HD, and any track the page's Audio
   channels, dialogue boost or night mode reshapes. The session asks for 8 channels and gets them
@@ -93,8 +93,9 @@ on a Samsung TV with a Samsung HW-Q990F soundbar on eARC:
   A Dolby bitstream widens the link, and it stays wide for the PCM that follows: Infuse played
   TrueHD as stereo PCM, then as multichannel PCM after a switch to the E-AC-3 track and back,
   and this app's TrueHD did too from then on. A second of silent Dolby played before the video
-  loaded didn't do it: the load's silence let the link fall back to stereo. So silent Dolby
-  Digital Plus Atmos (AetherEngine's `silent-atmos.mp4`) plays through every load, a return from
+  loaded didn't do it: the load's silence let the link fall back to stereo. So, with the app
+  menu's **Turn the Dolby primer on** (off by default, kept across launches, from the next video),
+  silent Dolby Digital Plus Atmos (AetherEngine's `silent-atmos.mp4`) plays through every load, a return from
   the background and an audio track switch, and stops a few seconds after the video's own sound
   has started, so the two overlap as in Infuse. That widens the link (the soundbar shows Dolby),
   but the video's player has set its sound output up at stereo by then and keeps it: the soundbar
@@ -111,12 +112,14 @@ on a Samsung TV with a Samsung HW-Q990F soundbar on eARC:
   as the soundbar switched. DTS and DTS-HD did the same, and so did a return from the background
   and an audio track switch. The shorter, earlier pause is on trial. Not yet
   measured: whether every 7.1 channel reaches its own speaker. The app menu's Dolby primer line says whether the
-  Dolby played and whether the video was paused and played. Its route reads 2 channels either
+  Dolby played and whether the video was paused and played, or that the primer is off. Its route reads 2 channels either
   way, so only the soundbar shows whether it worked.
 - Picture in picture closes on an HDR or frame-rate video: the window opens, the video goes back
   full screen, then the TV goes to the Home screen.
 
-With it on, both work: multichannel PCM in full and the window over the Home screen. With it on,
+With it on, both work: multichannel PCM and the window over the Home screen. On the HW-Q990F,
+though, the left and right surrounds then played from the front speakers, so this setup keeps it
+off and turns the Dolby primer on. With it on,
 tvOS sends all sound inside Dolby MAT, decoded PCM included, which the TV passes over eARC intact;
 with it off, decoded sound goes out as plain PCM, which this TV's eARC takes only as stereo. The
 picture-in-picture failure is likely, but unconfirmed, tvOS setting the HDMI audio link up again

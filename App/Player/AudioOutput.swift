@@ -92,6 +92,17 @@ enum AudioOutput {
     private static let primerLongest: TimeInterval = 30
 
     /**
+     * The app menu's switch for the primer and the pause and play after it (`AetherPlayer.settleAudio`),
+     * off by default. They're for a link that idles at stereo and stays there for decoded multichannel
+     * sound (Continuous Audio Connection off, seen with Samsung and Sonos soundbars); elsewhere they
+     * only cost a pause a few seconds in. Read as each video loads.
+     */
+    static var primerEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: "audio.dolbyPrimer") }
+        set { UserDefaults.standard.set(newValue, forKey: "audio.dolbyPrimer") }
+    }
+
+    /**
      * With Continuous Audio Connection off, the HDMI link idles at stereo PCM, and sound the
      * Apple TV decodes (TrueHD, DTS-HD, anything shaped) plays downmixed into it, whichever
      * player plays it: asking the session for more channels doesn't widen it. A Dolby bitstream
@@ -113,7 +124,7 @@ enum AudioOutput {
      * primer while the video plays, then pauses and plays the video (`AetherPlayer.settleAudio`).
      */
     static func startPrimer() {
-        guard routeIsHDMI,
+        guard primerEnabled, routeIsHDMI,
               let url = Bundle.main.url(forResource: "silent-atmos", withExtension: "mp4") else { return }
         primerTurn += 1
         let turn = primerTurn

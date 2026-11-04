@@ -276,6 +276,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
         lines.append("")
         lines += TopShelf.report
         let held = AetherPlayer.heldSourceConnection
+        let priming = AudioOutput.primerEnabled
         let menu = AppMenu(title: "AIOStreams", text: lines.joined(separator: "\n"), actions: [
             AppMenu.Action(title: "Play a test video…", destructive: false) { [weak self] in self?.askTestVideo() },
             AppMenu.Action(title: "Reload", destructive: false) { [weak self] in self?.loadPage() },
@@ -285,6 +286,13 @@ final class MainViewController: UIViewController, RemoteReceiver {
                 self?.flashStatus(held
                     ? "Ranged source requests from the next video"
                     : "One held source connection from the next video")
+            },
+            AppMenu.Action(title: priming ? "Turn the Dolby primer off" : "Turn the Dolby primer on", destructive: false) {
+                [weak self] in
+                AudioOutput.primerEnabled = !priming
+                self?.flashStatus(priming
+                    ? "Dolby primer off from the next video"
+                    : "Dolby primer on from the next video: for surround that plays as stereo")
             },
             AppMenu.Action(title: "Reset the app's data", destructive: true) { [weak self] in self?.confirmReset() },
             AppMenu.Action(title: "Close", destructive: false) {},

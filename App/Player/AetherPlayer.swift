@@ -549,8 +549,9 @@ final class AetherPlayer {
     private static let reopenAfterPrimer: TimeInterval = 2
     private static let reopenPause: TimeInterval = 0.3
 
-    /// The file gets the Dolby primer and `settleAudio`'s pause and play: everything but a trailer.
-    private var primes: Bool { current?.isTrailer != true }
+    /// The file gets the Dolby primer and `settleAudio`'s pause and play: everything but a trailer, while
+    /// the app menu's switch for them is on (`AudioOutput.primerEnabled`, off by default).
+    private var primes: Bool { current?.isTrailer != true && AudioOutput.primerEnabled }
 
     /**
      * Ends the Dolby primer `after` seconds from now, then, for sound the Apple TV decodes over more
@@ -951,7 +952,11 @@ final class AetherPlayer {
         }
         lines.append("Audio shaping: \(engine.audioShapingState.rawValue)")
         lines.append("Audio output: \(AudioOutput.routeSummary)")
-        if let prime = AudioOutput.lastPrime { lines.append("Dolby primer: \(prime)") }
+        if !AudioOutput.primerEnabled {
+            lines.append("Dolby primer: off (app menu)")
+        } else if let prime = AudioOutput.lastPrime {
+            lines.append("Dolby primer: \(prime)")
+        }
         if !AudioOutput.routeIsHDMI { lines.append("Atmos needs the HDMI output; this route can't carry Dolby MAT") }
         var connection = "Source connection: " + (openedHeld ? "held (one connection)" : "ranged requests")
         if openedHeld != Self.heldSourceConnection { connection += "; the next video opens with the other" }
