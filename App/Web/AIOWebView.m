@@ -94,6 +94,7 @@ static NSString *AIOMimeType(NSString *extension) {
 - (void)navigationFinished;
 - (void)navigationFailed:(NSError *)error;
 - (void)contentProcessEnded:(AIOPageEnd)reason;
+- (void)responsive:(BOOL)responsive;
 - (void)openURL:(NSURL *)url;
 - (void)served:(NSString *)path status:(NSInteger)status bytes:(NSUInteger)bytes;
 @end
@@ -134,6 +135,15 @@ static NSString *AIOMimeType(NSString *extension) {
 
 - (void)webViewWebContentProcessDidTerminate:(id)webView {
     [self.owner contentProcessEnded:AIOPageEndUnknown];
+}
+
+/** WebKit's private calls when the page's process stops answering it, and when it answers again. */
+- (void)_webViewWebProcessDidBecomeUnresponsive:(id)webView {
+    [self.owner responsive:NO];
+}
+
+- (void)_webViewWebProcessDidBecomeResponsive:(id)webView {
+    [self.owner responsive:YES];
 }
 
 /** The app's pages and what they embed load; a link anywhere else goes to the system. */
@@ -461,6 +471,10 @@ static NSString *AIOMimeType(NSString *extension) {
     if (!info || ![info respondsToSelector:footprintSel]) return -1;
     size_t bytes = ((size_t (*)(id, SEL))objc_msgSend)(info, footprintSel);
     return (NSInteger)(bytes >> 20);
+}
+
+- (void)responsive:(BOOL)responsive {
+    if (self.onResponsiveness) self.onResponsiveness(responsive);
 }
 
 - (void)openURL:(NSURL *)url {

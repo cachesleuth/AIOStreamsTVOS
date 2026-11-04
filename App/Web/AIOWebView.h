@@ -36,6 +36,11 @@ typedef NS_ENUM(NSInteger, AIOPageEnd) {
  * `url`, where it was; without one, the view loads it itself.
  */
 @property (nonatomic, copy, nullable) void (^onProcessEnded)(NSURL *_Nullable url, AIOPageEnd reason);
+/**
+ * The page's process stopped answering WebKit (`responsive` NO), or answers
+ * again (YES). WebKit's private calls, so an older WebKit may not make them.
+ */
+@property (nonatomic, copy, nullable) void (^onResponsiveness)(BOOL responsive);
 /** A link to anywhere but the app's own pages, such as an external player's. */
 @property (nonatomic, copy, nullable) void (^onOpenURL)(NSURL *url);
 /** A file the app served, or failed to. */

@@ -117,17 +117,42 @@ enum MemoryLog {
         case 0: return "out of memory"
         case 1: return "too much processor time"
         case 2: return "closed by WebKit"
-        case 3: return "a crash or hang"
+        // tvOS killing it for memory comes through as this too, as WebKit only sees its process die.
+        case 3: return "crashed or ran out of memory"
         case 4: return "WebKit's graphics process crashing repeatedly"
         default: return "no reason given"
         }
     }
 
+    /// When WebKit last said the page's process stopped answering, while it still hasn't.
+    private static var unresponsiveSince: Date?
+
+    /// WebKit's word that the page's process stopped answering it, or answers again.
+    static func pageResponsive(_ responsive: Bool, playing: Bool) {
+        let doing = playing ? "with a video loaded" : "while browsing"
+        if !responsive {
+            guard unresponsiveSince == nil else { return }
+            unresponsiveSince = Date()
+            note("page stopped responding \(doing)")
+        } else if let since = unresponsiveSince {
+            unresponsiveSince = nil
+            note("page responding again after \(seconds(since)) \(doing)")
+        }
+    }
+
+    private static func seconds(_ since: Date) -> String {
+        String(format: "%.1f s", Date().timeIntervalSince(since))
+    }
+
     static func pageEnded(playing: Bool, reason: AIOPageEnd) {
         pageEnds += 1
-        var before = lastWebMB.map { "; page \($0) MB" } ?? ""
-        if let gpu = lastGpuMB { before += ", WebKit graphics \(gpu) MB" }
-        if !before.isEmpty { before += " at most 5 s before" }
+        // Whether it was hung as it ended tells a hang from a crash or a memory kill.
+        var before = unresponsiveSince.map { "; not responding for \(seconds($0)) before" }
+            ?? "; responding up to the end"
+        unresponsiveSince = nil
+        var sizes = lastWebMB.map { "page \($0) MB" } ?? ""
+        if let gpu = lastGpuMB { sizes += (sizes.isEmpty ? "" : ", ") + "WebKit graphics \(gpu) MB" }
+        if !sizes.isEmpty { before += "; \(sizes) at most 5 s before" }
         lastWebMB = nil
         lastGpuMB = nil
         note("page's web process ended (\(cause(reason))) \(playing ? "with a video loaded" : "while browsing")\(before)")

@@ -78,6 +78,9 @@ final class MainViewController: UIViewController, RemoteReceiver {
                 ? "The page ran out of memory and reloaded."
                 : "The page stopped (\(MemoryLog.cause(reason))) and reloaded.")
         }
+        web.onResponsiveness = { [weak self] responsive in
+            MemoryLog.pageResponsive(responsive, playing: self?.player?.playing == true)
+        }
         MemoryLog.webMB = { [weak web] in
             guard let mb = web?.webProcessMB, mb >= 0 else { return nil }
             return mb
