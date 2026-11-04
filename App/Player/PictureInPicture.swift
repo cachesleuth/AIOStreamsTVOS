@@ -176,7 +176,7 @@ final class PictureInPicture: NSObject {
         let line: String = String(format: "+%.2f s  ", elapsed) + what
         NSLog("[pip] %@", line)
         Self.trace.append(line)
-        if Self.trace.count > 20 { Self.trace.removeFirst() }
+        if Self.trace.count > 30 { Self.trace.removeFirst() }
     }
 
     /// For the app menu: how long the last start took, step by step.
@@ -269,8 +269,35 @@ final class PictureInPicture: NSObject {
         guard left else { return }
         left = false
         step("back in the app; video back full screen")
-        stop()
+        bringBack()
     }
+
+    /**
+     * Puts the video back in the app on the way back from the Home screen. tvOS ignored a
+     * stopPictureInPicture made the moment the app became active (the window stayed over the app,
+     * and it never said it stopped), as it ignores the first Home screen ask, so this waits a moment
+     * and asks again until the window goes, `bringBackTries` times at most.
+     */
+    private func bringBack(attempt: Int = 1) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.bringBackWait) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.active else { return }
+                guard UIApplication.shared.applicationState == .active else {
+                    return self.step("left the app again; window kept")
+                }
+                guard attempt <= Self.bringBackTries else {
+                    return self.step("window still showing after \(Self.bringBackTries) asks")
+                }
+                self.step("asking the window to close (try \(attempt))")
+                self.restoring = true
+                self.controller?.stopPictureInPicture()
+                self.bringBack(attempt: attempt + 1)
+            }
+        }
+    }
+
+    private static let bringBackWait: TimeInterval = 0.6
+    private static let bringBackTries = 4
 
     // MARK: The display mode
 
@@ -448,8 +475,13 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
         completionHandler(true)
     }
 
+    nonisolated func pictureInPictureControllerWillStopPictureInPicture(_ controller: AVPictureInPictureController) {
+        MainActor.assumeIsolated { step("window closing") }
+    }
+
     nonisolated func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
         MainActor.assumeIsolated {
+            step(restoring ? "window closed; video in the app" : "window closed; video paused")
             showWatch?.cancel()
             showWatch = nil
             player.setPictureInPicture(false)

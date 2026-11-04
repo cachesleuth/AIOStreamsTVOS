@@ -223,7 +223,9 @@ the bridge script adds the button to the page's controls, in the look of the pag
   if tvOS stays silent 2 seconds on and the window shows, the app goes anyway. The criteria go back when
   the video returns to the app. Only a video that switched the TV when it started does this (the
   app watches tvOS's mode-switch notifications); the rest open the window straight away.
-- Opening the app again, or the window's full-screen button, puts the video back in the app.
+- Opening the app again, or the window's full-screen button, puts the video back in the app. tvOS
+  ignored the app's ask to close the window made the moment it was back (the window stayed over
+  the app), so it asks 0.6 s later, and again every 0.6 s while the window shows, four times at most.
   Closing the window pauses the video, as on Android. Only a return from the background counts
   as opening the app again: tvOS takes focus from the app and gives it back while the window
   settles, and when it ignores the first Home screen ask (often just after a mode switch), and
@@ -296,6 +298,9 @@ Back behaviour and the bundled-player path. It also means:
 - Settings → About names the app's version **tvOS app**, and its Credits list AetherEngine as the
   player, with FFmpeg, dav1d, libdovi, libzvbi, libass and VideoToolbox, rather than mpv
   (`patches/web/0010-tvos-about-names-its-engine.patch`). They're in English only.
+- Settings → **Donate** lists the GitHub Sponsors and Ko-fi links as text
+  (`https://github.com/sponsors/Viren070`, `https://ko-fi.com/Viren070`) rather than buttons that
+  open them, as a TV has no browser to open them in (`patches/web/0011-tvos-donate-shows-links.patch`).
 
   **Hardware decoding** always shows, where the page hid it while a stored engine setting said
   ExoPlayer.
