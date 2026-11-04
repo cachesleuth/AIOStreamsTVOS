@@ -300,7 +300,8 @@ Back behaviour and the bundled-player path. It also means:
   ExoPlayer.
 - AetherEngine always plays. The app answers the page that it plays with ExoPlayer, which like
   AetherEngine plays on the system's decoders, so the page shows ExoPlayer's statistics, filled in
-  from the engine. The **Play with mpv** retry the page offers after a failed load, when a stored
+  from the engine. Their Engine line names AetherEngine and its version, which the app sends with
+  the numbers (`patches/web/0009-tvos-stats-name-the-engine.patch`). The **Play with mpv** retry the page offers after a failed load, when a stored
   engine setting isn't Automatic, does nothing.
 - **Cache size** (Settings → Playback → Player) sizes the engine's buffer: with a size picked, it
   buffers ahead until the cache holds that much, at least about 40 seconds and at most a quarter of

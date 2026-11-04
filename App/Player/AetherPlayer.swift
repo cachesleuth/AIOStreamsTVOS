@@ -856,7 +856,8 @@ final class AetherPlayer {
      * passthrough included. `cpuMs` and `atMs` give it the app's CPU use.
      */
     func stats() -> Message {
-        var stats: Message = [:]
+        // The page's readout names the engine from this, where it writes ExoPlayer otherwise (patches/web/0009).
+        var stats: Message = ["engine": "AetherEngine \(Self.version)"]
         if let codec = engine.sourceVideoCodecName {
             stats["videoMime"] = Self.videoMimes[codec] ?? "video/\(codec)"
             stats["width"] = Int(engine.sourceVideoWidth)
