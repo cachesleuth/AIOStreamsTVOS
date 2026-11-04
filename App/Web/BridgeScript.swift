@@ -48,28 +48,7 @@ enum BridgeScript {
   try {
     Object.defineProperty(window, 'devicePixelRatio', { get: () => 1, configurable: true });
   } catch {}
-  /*
-   * The page also sizes artwork by the screen against its own width, and
-   * tvOS reports a 4K screen as 3840 wide to a page laid out 1920 wide, so it
-   * still asked for everything at twice the size: a backdrop came as a
-   * 3840x2160 picture, 33 MB decoded. The screen is reported as the page's
-   * own size, so artwork comes at the size it is drawn, up to 1920 wide.
-   */
-  try {
-    const proto = Object.getPrototypeOf(window.screen);
-    const own = (inner, fallback) => () => window[inner] || fallback;
-    for (const [name, inner] of [
-      ['width', 'innerWidth'],
-      ['availWidth', 'innerWidth'],
-      ['height', 'innerHeight'],
-      ['availHeight', 'innerHeight'],
-    ]) {
-      Object.defineProperty(proto, name, {
-        get: own(inner, name.toLowerCase().includes('width') ? 1920 : 1080),
-        configurable: true,
-      });
-    }
-  } catch {}
+
   /*
    * On a TV the page eases keyed scrolling by sliding the page, or a row of
    * cards, in nested layers (`data-glide-layer`), one animation per key
