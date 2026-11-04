@@ -199,6 +199,17 @@ final class AetherPlayer {
         if !settings.dolbyVision || !AetherEngine.displayCapabilities.supportsDolbyVision {
             options.dolbyVisionHandling = .baseLayerOnly
         }
+        // The page's Cache size: the engine buffers ahead until the cache holds that much, and keeps what
+        // played behind it in the same space, so a seek back is at once. The window is the engine's
+        // whole-source opt-in, bounded by those bytes (`PrefetchDiskBudget`) rather than a count of
+        // segments, as the file's bitrate isn't known before it opens. It stays at least 10 segments
+        // (~40 s) ahead whatever the size, and a quarter of the free space caps it. Automatic keeps
+        // the engine's own: ~40 s ahead and up to 2 GiB behind. The engine's software player keeps its
+        // packets in memory on tvOS, 96 MB ahead and 128 MB behind, and the size changes nothing there.
+        if settings.cacheMb > 0 {
+            options.forwardBufferSegments = Self.cacheWindowSegments
+            options.sessionCacheByteBudget = settings.cacheMb * 1_000_000
+        }
         options.heldSourceConnection = Self.heldSourceConnection
         openedHeld = options.heldSourceConnection
         // ASS and SSA cues come as their event lines, for libass (`SubtitleOverlay`); other formats are unaffected.
@@ -208,6 +219,10 @@ final class AetherPlayer {
         options.prepareNativeSubtitles = true
         return options
     }
+
+    /// The engine's largest forward window (about 3 hours of 4 s segments): with a Cache size set, the
+    /// bytes bound the buffer, not this.
+    private static let cacheWindowSegments = 2700
 
     /// The page's channel limit, dialogue boost and night mode. Shaping needs the decoded sound, so any of them
     /// costs passthrough and Atmos; 7.1 and Automatic with no boost and night mode off shape nothing.

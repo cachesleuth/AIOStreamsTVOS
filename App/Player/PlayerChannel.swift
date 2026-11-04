@@ -36,8 +36,6 @@ final class PlayerChannel: PlayerListener {
     /// A file is loaded, playing or paused.
     var playing: Bool { loaded }
 
-    /// The page's Picture-in-picture setting, from the item playing.
-    private(set) var pictureInPictureAllowed = false
 
     /// The page closed the player, so a picture-in-picture window has nothing left to show.
     var onStopped: () -> Void = {}
@@ -96,7 +94,6 @@ final class PlayerChannel: PlayerListener {
             case "now-playing":
                 let item = message.object("item")
                 nowPlaying.setItem(item)
-                pictureInPictureAllowed = item?.flag("pip") == true
                 if item == nil { showVideo(false) }
             case "player-thumbnail":
                 let url = message.text("url") ?? ""

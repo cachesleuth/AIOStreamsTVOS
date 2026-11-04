@@ -211,8 +211,13 @@ enum BridgeScript {
     tv: true,
     voice: false,
     gamepads: false,
-    // Shows the page's Picture-in-picture setting; the app's button in the player starts the window (PictureInPicture.swift).
+    // The page hides its player while the picture-in-picture window shows; the app's button in the
+    // player starts the window (PictureInPicture.swift).
     pip: true,
+    // Hides the Android settings this app can't honour (patches/web/0007): the Android app section
+    // (updates, picture-in-picture, background play, mpv.conf), the engine, tunneling, frame-rate
+    // matching (tvOS's own Match Content) and passthrough.
+    appleTv: true,
     device: __DEVICE__,
     deviceId: __DEVICE_ID__,
     send,

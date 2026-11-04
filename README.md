@@ -203,8 +203,8 @@ the next one.
 While a video plays, the **picture-in-picture button** at the end of the player's bottom row moves
 it into a small window, and the app steps back to the Home screen; the video keeps playing over the
 Home screen and other apps (`App/Player/PictureInPicture.swift`). This is the Android app's
-picture-in-picture: the page's **Settings → Android app → Picture-in-picture** switch allows it,
-and the page hides its player while the window shows. tvOS only starts it from inside an app, so
+picture-in-picture, always offered: the page's Android app section, with its switch for it, is
+hidden here. The page hides its player while the window shows. tvOS only starts it from inside an app, so
 the bridge script adds the button to the page's controls, in the look of the page's own.
 
 - The window holds AetherEngine's AVPlayer layer (`nativePlayerLayer`), and its play/pause and
@@ -280,16 +280,33 @@ The web app picks its behaviour from the bridge's `platform`, and only knows `an
 app on a TV (`platform: 'android'`, `tv: true`). That gets the TV layout, remote navigation, the
 Back behaviour and the bundled-player path. It also means:
 
-- Jellyfin lists the device as **AIOStreams Android TV**.
-- Settings shows an **Android app** section. Its **Picture-in-picture** switch works (it shows the
-  app's button in the player). Updates show as off, **Play in the background** does
-  nothing (leaving the app pauses the video), and its mpv.conf editor, shown while the player
-  engine setting says mpv, says that nothing in it applies.
-- Android-only playback settings (frame rate matching, tunnelling) show and do nothing.
-- The **player engine** setting does nothing: AetherEngine always plays. The app answers the page
-  that it plays with ExoPlayer, which like AetherEngine plays on the system's decoders, so the page
-  hides mpv's options and shows ExoPlayer's statistics, filled in from the engine. The **Play with
-  mpv** retry the page offers after a failed load, when the setting isn't Automatic, does nothing.
+- Jellyfin lists the device as **AIOStreams Apple TV** (`patches/web/0008-tvos-named-apple-tv.patch`),
+  where the Android TV app is **AIOStreams Android TV**. It's the client name the server sees too
+  (`X-AIOStreams-Client`), so a config expression written for Android TV doesn't match it.
+- The bridge also says `appleTv: true`, and a web patch
+  (`patches/web/0007-tvos-hides-settings-it-ignores.patch`) hides the Android settings that do
+  nothing here:
+  - The whole **Android app** section: updates (none here), **Play in the background** (leaving
+    the app pauses the video), the mpv.conf editor, and **Picture-in-picture**, whose button the
+    player always shows. Its **Report a problem** row goes with it; the app menu (hold
+    Play/Pause) has the app's diagnostics.
+  - **Match the video's frame rate**: tvOS's own Match Content decides.
+  - **Tunneled playback**.
+  - **Engine**.
+  - **Pass surround audio through** and its formats: an Apple TV copies Dolby Digital (Plus) and
+    decodes the rest to PCM whatever is asked.
+
+  **Hardware decoding** always shows, where the page hid it while a stored engine setting said
+  ExoPlayer.
+- AetherEngine always plays. The app answers the page that it plays with ExoPlayer, which like
+  AetherEngine plays on the system's decoders, so the page shows ExoPlayer's statistics, filled in
+  from the engine. The **Play with mpv** retry the page offers after a failed load, when a stored
+  engine setting isn't Automatic, does nothing.
+- **Cache size** (Settings → Playback → Player) sizes the engine's buffer: with a size picked, it
+  buffers ahead until the cache holds that much, at least about 40 seconds and at most a quarter of
+  the free space, and keeps what played in the same space for seeking back. Automatic keeps the
+  engine's own (about 40 seconds ahead). It applies from the next video, and only to video AVPlayer
+  plays: the engine's software player keeps a fixed 96 MB ahead and 128 MB behind in memory.
 
 ## The remote
 

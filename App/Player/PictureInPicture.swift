@@ -4,9 +4,9 @@ import UIKit
 
 /**
  * The video in a small window over the Home screen and other apps, as the
- * Android app's picture-in-picture. The page turns it on and off with its
- * Picture-in-picture setting, which comes in each `now-playing` item, and
- * hides its player while the window shows (`pip` messages), as on Android.
+ * Android app's picture-in-picture. It's always offered: the page's
+ * Picture-in-picture setting is hidden on this app. The page hides its player
+ * while the window shows (`pip` messages), as on Android.
  *
  * Android enters it on leaving the app; tvOS only starts it from inside the
  * app, so it starts from a button the bridge script adds to the page's player
@@ -70,9 +70,10 @@ final class PictureInPicture: NSObject {
 
     var active: Bool { controller?.isPictureInPictureActive == true }
 
-    /// The player's button shows: a video plays on the engine's AVPlayer and the page's setting allows it.
+    /// The player's button shows: a video plays on the engine's AVPlayer. The page's Picture-in-picture
+    /// setting is hidden with its Android app section (patches/web/0007), so it doesn't count.
     var offered: Bool {
-        supported && !active && channel.playing && channel.pictureInPictureAllowed
+        supported && !active && channel.playing
             && player.engine.nativePlayerLayer != nil
     }
 

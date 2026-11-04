@@ -90,7 +90,7 @@ struct PlayerSettings: Equatable {
     var dialogueBoost = 0.0
     /// Evens out loud and quiet scenes.
     var nightMode = false
-    /// Megabytes of the stream to hold, 0 for the app's default.
+    /// Megabytes of the stream to hold, ahead and behind, 0 for the engine's own (`AetherPlayer.options`).
     var cacheMb = 0
 }
 
@@ -172,7 +172,9 @@ enum PlayerProtocol {
         settings.audioDelayMs = message.number("audioDelayMs") ?? 0
         settings.dialogueBoost = max(0, message.number("dialogueBoost") ?? 0)
         settings.nightMode = message.flag("nightMode") == true
-        settings.cacheMb = Int(message.number("cacheMb") ?? 0)
+        // The page offers 128 to 1000 MB; a value far outside that is held to 64...4000.
+        let cacheMb = message.number("cacheMb") ?? 0
+        settings.cacheMb = cacheMb.isFinite && cacheMb > 0 ? Int(min(max(cacheMb, 64), 4000)) : 0
         return settings
     }
 
