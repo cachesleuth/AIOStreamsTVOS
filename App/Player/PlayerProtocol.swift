@@ -90,6 +90,9 @@ struct PlayerSettings: Equatable {
     var dialogueBoost = 0.0
     /// Evens out loud and quiet scenes.
     var nightMode = false
+    /// The page's Object audio switch (tvOS only): TrueHD Atmos and DTS:X keep their objects and heights,
+    /// rendered into a 7.1.4 bed, instead of playing as their 7.1 (`AetherPlayer.options`).
+    var objectAudio = false
     /// Megabytes of the stream to hold, ahead and behind, 0 for the engine's own (`AetherPlayer.options`).
     var cacheMb = 0
 }
@@ -172,6 +175,7 @@ enum PlayerProtocol {
         settings.audioDelayMs = message.number("audioDelayMs") ?? 0
         settings.dialogueBoost = max(0, message.number("dialogueBoost") ?? 0)
         settings.nightMode = message.flag("nightMode") == true
+        settings.objectAudio = message.flag("objectAudio") == true
         // The page offers 128 to 1000 MB; a value far outside that is held to 64...4000.
         let cacheMb = message.number("cacheMb") ?? 0
         settings.cacheMb = cacheMb.isFinite && cacheMb > 0 ? Int(min(max(cacheMb, 64), 4000)) : 0

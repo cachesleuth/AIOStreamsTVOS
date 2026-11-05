@@ -46,8 +46,9 @@ page the same way:
   the engine decodes itself. `AetherPlayer` and `PlayerChannel` follow AIOStreams' Android
   `PlayerChannel`: the same messages, so the page is unchanged.
 - **`Packages/AetherHost`** pins the engine's version and re-exports it. The engine's optional
-  components (TrueHD Atmos and DTS:X object rendering among them) are package traits, which
-  XcodeGen can't set, so they would be turned on there; they're all off.
+  components are package traits, which XcodeGen can't set, so they're turned on there: TrueHD
+  Atmos and DTS:X object rendering are on, for the page's Object audio switch; the Dolby Vision
+  ones are off.
 
 ### Dolby Atmos
 
@@ -61,6 +62,16 @@ PCM and never Atmos.
   lossless multichannel PCM (up to 7.1), as Infuse plays them, whatever the passthrough setting.
   TrueHD Atmos and DTS:X play as their 7.1, without the objects and heights. A receiver takes PCM
   over HDMI or eARC; a soundbar behind a TV's plain ARC gets stereo.
+- **Object audio** (Settings → Audio → Output on the page, tvOS only, off by default, from the
+  next video): the engine renders TrueHD Atmos objects and DTS:X heights into a 7.1.4 bed, which
+  tvOS sends to the receiver as 12 channels of PCM inside Dolby MAT, so it shows Atmos. Needs
+  tvOS 26, a 48 kHz track and no shaping (Audio channels Stereo or 5.1, dialogue boost, night
+  mode); anything else plays its 7.1 as above. With it on, the automatic audio pick prefers a
+  TrueHD Atmos or DTS:X track over another format in the same language. The statistics' Object
+  audio line shows the bed and the objects playing. On the engine's software player (below) the
+  same engine setting also hands an E-AC-3 Atmos track to tvOS's renderer compressed, which
+  played nothing when tried (de850fa), so that case may be silent with the switch on. Not yet
+  tried on a receiver.
 - **What turns Atmos off**: the page's Audio channels set to Stereo or 5.1 (the engine decodes the
   sound to fit), and any output but HDMI, which alone carries Dolby MAT: Bluetooth gets a stereo
   mix, AirPods a spatial render. So does video the engine decodes itself (AV1, which no Apple TV
@@ -403,6 +414,7 @@ the page.
 ## Licences
 
 AetherEngine is LGPL-3.0 with an app store exception, and its FFmpeg build is LGPL-2.1, linked
-dynamically. `App/Player/silent-atmos.mp4` is AetherEngine's, written by its
+dynamically. LibTrueHD, linked for TrueHD Atmos object rendering, is MIT, with truehdd's `truehd`
+and `oamd` crates under Apache-2.0 (its `NOTICE` is in the app's Licences list). `App/Player/silent-atmos.mp4` is AetherEngine's, written by its
 `Scripts/make-silent-atmos.swift` (from SpatialAudioBridge, Apache-2.0). Builds of this app are for personal use. The web app is AIOStreams', under its
 licence.

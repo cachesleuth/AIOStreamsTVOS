@@ -14,10 +14,12 @@ import PackageDescription
  * AVPlayer route's FLAC bridge was right as upstream has it. Back to an
  * upstream version once that fix is released there.
  *
- * Its optional components (TrueHD Atmos and DTS:X object rendering, Dolby
- * Vision dual layer) stay off: the app plays TrueHD and DTS-HD as 7.1 PCM, as
- * Infuse does. To turn one on, add `traits: [...]` to the dependency here;
- * XcodeGen can't set a package's traits, which is why this package exists.
+ * TrueHD Atmos and DTS:X object rendering (`TrueHDObjectAudio`,
+ * `DTSXObjectAudio`) are built in, for the page's Object audio switch (off by
+ * default, `AetherPlayer.options`); TrueHD brings LibTrueHD with it. Without
+ * the switch the app plays TrueHD and DTS-HD as 7.1 PCM, as Infuse does. The
+ * other optional components (Dolby Vision dual layer, still reshaping) stay
+ * off. XcodeGen can't set a package's traits, which is why this package exists.
  */
 let package = Package(
     name: "AetherHost",
@@ -26,7 +28,8 @@ let package = Package(
         .library(name: "AetherHost", targets: ["AetherHost"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/mickey2266/AetherEngine", revision: "6de6385097104b0aa3fea11c92500ae0eaadc13c"),
+        .package(url: "https://github.com/mickey2266/AetherEngine", revision: "6de6385097104b0aa3fea11c92500ae0eaadc13c",
+                 traits: ["TrueHDObjectAudio", "DTSXObjectAudio"]),
     ],
     targets: [
         .target(

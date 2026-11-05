@@ -246,7 +246,8 @@ enum AppAnswers {
     }
 
     /// What the app ships besides the page, for the page's Licences list. FFmpegBuild bundles dav1d, zimg
-    /// and libzvbi (its README's licence table; libzvbi's GPL files are left out of that build), and
+    /// and libzvbi (its README's licence table; libzvbi's GPL files are left out of that build), the
+    /// engine's `TrueHDObjectAudio` trait links LibTrueHD with truehdd's crates (Apache-2.0), and
     /// swift-libass bundles libass with FreeType, FriBidi, HarfBuzz, fontconfig and libpng (its README's
     /// prebuilt versions).
     static let licenses: Message = [
@@ -262,6 +263,7 @@ enum AppAnswers {
             "FreeType License (or GPL-2.0): https://gitlab.freedesktop.org/freetype/freetype/-/blob/master/docs/FTL.TXT",
             "PNG Reference Library License, version 2: https://github.com/pnggroup/libpng/blob/libpng16/LICENSE",
             "Fontconfig licence (MIT style): https://gitlab.freedesktop.org/fontconfig/fontconfig/-/blob/main/COPYING",
+            "Apache License, version 2.0: https://www.apache.org/licenses/LICENSE-2.0 (LibTrueHD's NOTICE: https://github.com/superuser404notfound/LibTrueHD/blob/main/NOTICE)",
         ],
         "libraries": [
             ["name": "AetherEngine", "licence": "LGPL-3.0", "url": "https://github.com/superuser404notfound/AetherEngine", "texts": [0]],
@@ -270,6 +272,8 @@ enum AppAnswers {
             ["name": "zimg (FFmpegBuild)", "licence": "WTFPL", "url": "https://github.com/sekrit-twc/zimg", "texts": [4]],
             ["name": "libzvbi (FFmpegBuild)", "licence": "LGPL-2.0-or-later", "url": "https://github.com/zapping-vbi/zvbi", "texts": [5, 2]],
             ["name": "libdovi (LibDovi)", "licence": "MIT", "url": "https://github.com/quietvoid/dovi_tool", "texts": [2]],
+            ["name": "LibTrueHD", "licence": "MIT", "url": "https://github.com/superuser404notfound/LibTrueHD", "texts": [2]],
+            ["name": "truehd and oamd (truehdd, in LibTrueHD)", "licence": "Apache-2.0", "url": "https://github.com/truehdd/truehdd", "texts": [10]],
             ["name": "swift-libass", "licence": "MIT", "url": "https://github.com/mihai8804858/swift-libass", "texts": [2]],
             ["name": "libass", "version": "0.17.3", "licence": "ISC", "url": "https://github.com/libass/libass", "texts": [6]],
             ["name": "FreeType", "version": "2.13.2", "licence": "FTL OR GPL-2.0-or-later", "url": "https://freetype.org", "texts": [7]],
