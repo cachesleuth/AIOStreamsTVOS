@@ -63,8 +63,11 @@ PCM and never Atmos.
   TrueHD Atmos and DTS:X play as their 7.1, without the objects and heights. A receiver takes PCM
   over HDMI or eARC; a soundbar behind a TV's plain ARC gets stereo.
 - **Object audio** (Settings → Audio → Output on the page, tvOS only, off by default, from the
-  next video): the engine renders TrueHD Atmos objects and DTS:X heights into a 7.1.4 bed, which
-  tvOS sends to the receiver as 12 channels of PCM inside Dolby MAT, so it shows Atmos. Needs
+  next video): the engine renders TrueHD Atmos objects and DTS:X heights into the Speakers layout
+  under the switch, 7.1.4 (the default) or 9.1.6, which tvOS sends to the receiver as 12 or 16
+  channels of PCM inside Dolby MAT, so it shows Atmos; the receiver fits it to the speakers it has,
+  so 7.1.4 is the one for every smaller system. 9.1.6 places objects on wides and middle heights
+  instead of leaving the receiver to spread them there. Needs
   tvOS 26, a 48 kHz track and no shaping (Audio channels Stereo or 5.1, dialogue boost, night
   mode); anything else plays its 7.1 as above. With it on, the automatic audio pick prefers a
   TrueHD Atmos or DTS:X track over another format in the same language. The statistics' Object

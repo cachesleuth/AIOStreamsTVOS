@@ -28,7 +28,8 @@ protocol PlayerListener: AnyObject {
  * - TrueHD and DTS-HD can't be bitstreamed by an Apple TV, so they're decoded
  *   to multichannel PCM, up to 7.1, as Infuse does. TrueHD Atmos and DTS:X
  *   play as their 7.1, without objects or heights, unless the page's Object
- *   audio switch is on: then the engine renders them into a 7.1.4 bed.
+ *   audio switch is on: then the engine renders them into a 7.1.4 or 9.1.6
+ *   bed, the page's Speakers choice.
  * - Anything that shapes the sound (stereo, 5.1) decodes it, which drops the
  *   objects; so does a TV whose ARC takes only stereo.
  *
@@ -183,15 +184,16 @@ final class AetherPlayer {
         // 5.1, which is why it isn't used. E-AC-3 and AC-3 are copied on the AVPlayer route either way.
         options.audioBridgeMode = .lossless
         // The page's Object audio switch, off by default: the engine renders TrueHD Atmos objects and
-        // DTS:X heights into a 7.1.4 bed (DTS:X renders into 7.1.4 or 9.1.6 only), which tvOS sends to
-        // the receiver as 12 channels of PCM inside Dolby MAT, so the receiver shows Atmos. Only on
+        // DTS:X heights into the page's Speakers layout, 7.1.4 (the default) or 9.1.6, the two DTS:X
+        // renders into. tvOS sends it to the receiver as 12 or 16 channels of PCM inside Dolby MAT, so
+        // the receiver shows Atmos, and fits it to the speakers it has. Only on
         // tvOS 26 and later, at 48 kHz, and not with any shaping (stereo, 5.1, dialogue boost, night
         // mode); the rest keeps the 7.1 above. With it on, the engine's automatic audio pick also
         // prefers a TrueHD Atmos or DTS:X track over another format in the same language. On the
         // engine's software player (AV1, VP9, interlaced H.264, Hardware decoding off) the same setting
         // also hands an E-AC-3 Atmos track to tvOS's renderer compressed, which played nothing when
         // tried (de850fa), so with the switch on that one case may be silent.
-        if settings.objectAudio { options.objectAudioRendering = .render(.l714) }
+        if settings.objectAudio { options.objectAudioRendering = .render(settings.objectAudioLayout) }
         options.audioShaping = shaping
         options.audioDelaySeconds = settings.audioDelayMs / 1000
         if !settings.hardwareDecoding { options.preferredDecodePath = .software }

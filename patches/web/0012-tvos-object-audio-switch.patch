@@ -1,5 +1,5 @@
 diff --git a/packages/web/src/lib/hosts/shell/player.ts b/packages/web/src/lib/hosts/shell/player.ts
-index 8194bedd..5e64fb61 100644
+index 8194bedd..e9f71c86 100644
 --- a/packages/web/src/lib/hosts/shell/player.ts
 +++ b/packages/web/src/lib/hosts/shell/player.ts
 @@ -29,7 +29,12 @@ import type {
@@ -16,40 +16,74 @@ index 8194bedd..5e64fb61 100644
  import { passthroughFormats } from './sound';
  
  const statsPages = (): Track[] => [
-@@ -664,6 +669,7 @@ export function playerSettings() {
+@@ -664,6 +669,10 @@ export function playerSettings() {
      nightMode: audio.nightMode.read(),
      ac3Encode: audio.ac3Encode.read(),
      cacheMb: Number(settings.player.cacheSize.read()) || 0,
-+    ...(appleTv() && { objectAudio: audio.objectAudio.read() }),
++    ...(appleTv() && {
++      objectAudio: audio.objectAudio.read(),
++      objectAudioLayout: audio.objectAudioLayout.read(),
++    }),
      ...(android
        ? {
            frameRate: video.frameRate.read(),
 diff --git a/packages/web/src/lib/settings.ts b/packages/web/src/lib/settings.ts
-index 0a3c5d59..52e6ac0e 100644
+index 0a3c5d59..eb5931cc 100644
 --- a/packages/web/src/lib/settings.ts
 +++ b/packages/web/src/lib/settings.ts
-@@ -992,6 +992,8 @@ export const settings = {
+@@ -528,6 +528,10 @@ const isPercent = (value: number) => value >= 0 && value <= 100;
+ export const AUDIO_CHANNELS = ['auto', 'stereo', '5.1', '7.1'] as const;
+ export type AudioChannels = (typeof AUDIO_CHANNELS)[number];
+ 
++/** The speaker layouts the Apple TV app renders object audio for; DTS:X renders into these two only. */
++export const OBJECT_AUDIO_LAYOUTS = ['7.1.4', '9.1.6'] as const;
++export type ObjectAudioLayout = (typeof OBJECT_AUDIO_LAYOUTS)[number];
++
+ /** What plays versions inside the Android app. */
+ export const PLAYER_ENGINES = ['auto', 'mpv', 'exoplayer'] as const;
+ export type PlayerEngine = (typeof PLAYER_ENGINES)[number];
+@@ -992,6 +996,14 @@ export const settings = {
        undefined,
        ['aiostreams-app-ac3-encode']
      ),
 +    /** The Apple TV app renders TrueHD Atmos and DTS:X objects and heights instead of playing their 7.1. */
 +    objectAudio: device<boolean>('aiostreams-web-audio-object-audio', false),
++    /** The speakers the Apple TV app renders object audio for. */
++    objectAudioLayout: device<ObjectAudioLayout>(
++      'aiostreams-web-audio-object-audio-layout',
++      '7.1.4',
++      OBJECT_AUDIO_LAYOUTS
++    ),
    },
    subtitle: {
      ...subtitleLook,
 diff --git a/packages/web/src/pages/settings/audio.tsx b/packages/web/src/pages/settings/audio.tsx
-index 7531153e..5f1ea050 100644
+index 7531153e..c9c2bc0a 100644
 --- a/packages/web/src/pages/settings/audio.tsx
 +++ b/packages/web/src/pages/settings/audio.tsx
-@@ -131,6 +131,7 @@ function OutputCard() {
+@@ -21,8 +21,10 @@ import {
+   AUDIO_DELAY_LIMIT_MS,
+   AUDIO_DELAY_STEP_MS,
+   DIALOGUE_BOOSTS,
++  OBJECT_AUDIO_LAYOUTS,
+   PASSTHROUGH_FORMATS,
+   type AudioChannels,
++  type ObjectAudioLayout,
+   type Passthrough,
+   type PassthroughFormat,
+ } from '../../lib/settings';
+@@ -131,6 +133,10 @@ function OutputCard() {
    const [passthrough, setPassthrough] = useSetting(settings.audio.passthrough);
    const [formats, setFormats] = useSetting(settings.audio.passthroughFormats);
    const [ac3Encode, setAc3Encode] = useSetting(settings.audio.ac3Encode);
 +  const [objectAudio, setObjectAudio] = useSetting(settings.audio.objectAudio);
++  const [objectLayout, setObjectLayout] = useSetting(
++    settings.audio.objectAudioLayout
++  );
    const info = useShellInfo();
    // An Apple TV copies Dolby Digital (Plus) and decodes the rest, whatever is asked.
    const tvos = appleTv();
-@@ -196,10 +197,30 @@ function OutputCard() {
+@@ -196,10 +202,48 @@ function OutputCard() {
            onValueChange={setAc3Encode}
          />
        )}
@@ -60,6 +94,18 @@ index 7531153e..5f1ea050 100644
 +          help={OBJECT_AUDIO.help}
 +          value={objectAudio}
 +          onValueChange={setObjectAudio}
++        />
++      )}
++      {tvos && objectAudio && (
++        <Select
++          label={OBJECT_AUDIO.layoutLabel}
++          help={OBJECT_AUDIO.layoutHelp}
++          options={OBJECT_AUDIO_LAYOUTS.map((l) => ({
++            value: l,
++            label: OBJECT_AUDIO.layouts[l],
++          }))}
++          value={objectLayout}
++          onValueChange={(v) => setObjectLayout(v as ObjectAudioLayout)}
 +        />
 +      )}
      </SettingsCard>
@@ -73,7 +119,13 @@ index 7531153e..5f1ea050 100644
 +/* eslint-disable lingui/no-unlocalized-strings -- the Apple TV app's own build, untranslated */
 +const OBJECT_AUDIO = {
 +  label: 'Object audio for TrueHD Atmos and DTS:X',
-+  help: 'Keeps their heights and objects, rendered for 7.1.4 speakers, instead of playing their 7.1. Needs tvOS 26 and an Atmos receiver or soundbar on HDMI. From the next video.',
++  help: 'Keeps their heights and objects, rendered for your speakers, instead of playing their 7.1. Needs tvOS 26 and an Atmos receiver or soundbar on HDMI.',
++  layoutLabel: 'Speakers',
++  layoutHelp: 'The layout object audio is rendered for. Your receiver or soundbar fits it to the speakers it has, so choose 9.1.6 only for a system with wide and middle height speakers.',
++  layouts: {
++    '7.1.4': '7.1.4, or fewer speakers',
++    '9.1.6': '9.1.6',
++  } satisfies Record<ObjectAudioLayout, string>,
 +};
 +/* eslint-enable lingui/no-unlocalized-strings */
 +
