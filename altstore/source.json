@@ -1,0 +1,30 @@
+{
+  "name": "AIOStreams for Apple TV",
+  "identifier": "io.github.mickey2266.aiostreams-tvos",
+  "subtitle": "The AIOStreams web app on tvOS, playing through AetherEngine.",
+  "description": "Unofficial and experimental. The IPA is unsigned: an Apple TV sideloader signs it with your own Apple ID or developer certificate before installing it. AltStore and SideStore read this source, but neither installs to an Apple TV itself; a tvOS sideloader that reads the AltStore source format does.",
+  "iconURL": "https://raw.githubusercontent.com/mickey2266/AIOStreamsTVOS/main/altstore/icon.png",
+  "website": "https://github.com/mickey2266/AIOStreamsTVOS",
+  "tintColor": "#1C1C1E",
+  "featuredApps": ["io.github.aiostreams.tvos"],
+  "apps": [
+    {
+      "name": "AIOStreams",
+      "bundleIdentifier": "io.github.aiostreams.tvos",
+      "developerName": "mickey2266",
+      "subtitle": "AIOStreams and Jellyfin on Apple TV.",
+      "localizedDescription": "The AIOStreams web app's standalone build, which signs in to any Jellyfin server, on tvOS. It plays through AetherEngine, so tvOS does what it does for its own apps: Match Content's HDR10, HLG and Dolby Vision modes, and Dolby Atmos. Unofficial and experimental; it uses private tvOS APIs, so it can't go on the App Store.",
+      "iconURL": "https://raw.githubusercontent.com/mickey2266/AIOStreamsTVOS/main/altstore/icon.png",
+      "tintColor": "#1C1C1E",
+      "category": "entertainment",
+      "versions": [],
+      "appPermissions": {
+        "entitlements": ["com.apple.security.application-groups"],
+        "privacy": {
+          "NSLocalNetworkUsageDescription": "AIOStreams connects to media servers on your local network."
+        }
+      }
+    }
+  ],
+  "news": []
+}

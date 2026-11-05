@@ -366,6 +366,21 @@ attaches it as an artifact, each push to `main` replaces the **Nightly** release
 publishes a release of its own. Sign it with your own Apple ID using a sideloading tool that
 handles Apple TV; with a free Apple ID the signature lasts 7 days, with a paid account a year.
 
+### Sideloading source
+
+Tagged releases are listed in an AltStore-format source, which SideStore reads too:
+
+```
+https://raw.githubusercontent.com/mickey2266/AIOStreamsTVOS/main/altstore/source.json
+```
+
+AltStore and SideStore can add it, but neither installs to an Apple TV itself. An Apple TV
+sideloader that reads the same format (FlareStore, for one) subscribes to it, signs the IPA and
+sends it to a paired Apple TV, and offers each new release as an update. The build workflow adds
+every `v*` release to the source (`scripts/update-source.py`, the version and build from
+`project.yml`), so a release is tagged after `MARKETING_VERSION` is bumped to match. The nightly
+isn't listed.
+
 On a Mac with Xcode 27 (AetherEngine supports no older one), [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 and Node 22+, for tvOS 18 or later:
 
@@ -412,7 +427,8 @@ the page.
 | `TopShelf`     | The Top Shelf extension: Continue Watching and Next Up                 |
 | `Shared`       | What the app and the extension both read: the saved list               |
 | `Packages`     | `AetherHost`: AetherEngine at a pinned commit, for the app to link |
-| `scripts`      | Building the web app into `WebBuild` (git-ignored) |
+| `scripts`      | Building the web app into `WebBuild` (git-ignored); adding a release to the sideloading source |
+| `altstore`     | The AltStore-format sideloading source and its icon |
 | `patches/web`  | Changes to the AIOStreams web app, applied only for this app's build |
 
 ## Licences
