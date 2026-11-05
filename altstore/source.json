@@ -6,7 +6,9 @@
   "iconURL": "https://raw.githubusercontent.com/mickey2266/AIOStreamsTVOS/main/altstore/icon.png",
   "website": "https://github.com/mickey2266/AIOStreamsTVOS",
   "tintColor": "#1C1C1E",
-  "featuredApps": ["io.github.aiostreams.tvos"],
+  "featuredApps": [
+    "io.github.aiostreams.tvos"
+  ],
   "apps": [
     {
       "name": "AIOStreams",
@@ -17,9 +19,21 @@
       "iconURL": "https://raw.githubusercontent.com/mickey2266/AIOStreamsTVOS/main/altstore/icon.png",
       "tintColor": "#1C1C1E",
       "category": "entertainment",
-      "versions": [],
+      "versions": [
+        {
+          "version": "1.0.0",
+          "buildVersion": "1",
+          "date": "2026-11-05",
+          "localizedDescription": "AIOStreams for Apple TV 1.0.0. Release notes: https://github.com/mickey2266/AIOStreamsTVOS/releases/tag/v1.0.0",
+          "downloadURL": "https://github.com/mickey2266/AIOStreamsTVOS/releases/download/v1.0.0/AIOStreams.ipa",
+          "size": 13666152,
+          "minOSVersion": "18.0"
+        }
+      ],
       "appPermissions": {
-        "entitlements": ["com.apple.security.application-groups"],
+        "entitlements": [
+          "com.apple.security.application-groups"
+        ],
         "privacy": {
           "NSLocalNetworkUsageDescription": "AIOStreams connects to media servers on your local network."
         }
