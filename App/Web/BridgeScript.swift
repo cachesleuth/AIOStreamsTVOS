@@ -65,15 +65,12 @@ enum BridgeScript {
   const HELD_LASTS = 250;
   const holding = () => held && performance.now() - lastDown < HELD_LASTS;
   /*
-   * Test: no glide layers at all. A Jetsam report showed the page's process
-   * killed at its limit (about 1.35 GB) a couple of minutes after a reload,
-   * nearly all of it outside its own heap, so most likely layer and picture
-   * memory. Each layer is kept composited (`will-change: transform`): three
-   * nested ones the height of the page, and three more the width of every
-   * row. With SLIDES off, those are plain boxes, and every keyed scroll jumps,
-   * single presses too. Set it back to true to slide again.
+   * Glide layers. Each layer is kept composited (`will-change: transform`):
+   * three nested ones the height of the page, and three more the width of
+   * every row. With SLIDES off, those are plain boxes, and every keyed scroll
+   * jumps, single presses too (tried while chasing the page's memory kills).
    */
-  const SLIDES = false;
+  const SLIDES = true;
   /*
    * Test: no masks or filters. The kills come within a second or two of an
    * item page opening with its version picker (`?pick=`), which draws its
@@ -85,22 +82,20 @@ enum BridgeScript {
    */
   const EFFECTS = false;
   /*
-   * Test: no layers kept at rest and no pulsing placeholders. With masks and
-   * blur off, the home page was still ended at its limit while its own
-   * pictures came to about 115 MB of the 1.3 GB: the rest most likely
-   * drawing surfaces, a screen-sized layer being about 33 MB at the TV's 2x.
-   * The rotating hero keeps several full-screen backdrops as standing layers
-   * (`will-change`), and rows that are loading show pulsing placeholders,
-   * each animated as a layer of its own. With LAYERS off, nothing asks to
-   * stay a layer and the placeholders hold still. Set it back to true to
-   * keep them.
+   * Standing layers and pulsing placeholders. The rotating hero keeps several
+   * full-screen backdrops as standing layers (`will-change`), and rows that
+   * are loading show pulsing placeholders, each animated as a layer of its
+   * own. With LAYERS off, nothing asks to stay a layer and the placeholders
+   * hold still (tried while chasing the page's memory kills, a screen-sized
+   * layer being about 33 MB at the TV's 2x).
    */
   const LAYERS = false;
   try {
     const rules = [];
+    // With SLIDES on, the glide layers keep their own will-change, so they slide as before.
     if (!LAYERS)
       rules.push(
-        '*,*::before,*::after{will-change:auto!important}',
+        (SLIDES ? '*:not([data-glide-layer])' : '*') + ',*::before,*::after{will-change:auto!important}',
         '.animate-pulse,.UI-Skeleton__root{animation:none!important}'
       );
     else if (!SLIDES) rules.push('[data-glide-layer]{will-change:auto!important}');
