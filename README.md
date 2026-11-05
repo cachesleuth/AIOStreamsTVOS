@@ -67,9 +67,10 @@ PCM and never Atmos.
   under the switch, 7.1.4 (the default) or 9.1.6, which tvOS sends to the receiver as 12 or 16
   channels of PCM inside Dolby MAT, so it shows Atmos; the receiver fits it to the speakers it has,
   so 7.1.4 is the one for every smaller system. 9.1.6 places objects on wides and middle heights
-  instead of leaving the receiver to spread them there. Needs
-  tvOS 26, a 48 kHz track and no shaping (Audio channels Stereo or 5.1, dialogue boost, night
-  mode); anything else plays its 7.1 as above. With it on, the automatic audio pick prefers a
+  instead of leaving the receiver to spread them there. The switch and Speakers show only with
+  Audio channels on Automatic: 7.1 is a limit too and plays the 7.1, and Stereo or 5.1 mix it
+  down. Needs tvOS 26, a 48 kHz track, and dialogue boost and night mode off, which shape the
+  sound (the engine puts shaping ahead of the render); anything else plays its 7.1 as above. With it on, the automatic audio pick prefers a
   TrueHD Atmos or DTS:X track over another format in the same language. The statistics' Object
   audio line shows the bed and the objects playing. On the engine's software player (below) the
   same engine setting also hands an E-AC-3 Atmos track to tvOS's renderer compressed, which

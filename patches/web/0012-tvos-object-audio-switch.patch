@@ -87,7 +87,7 @@ index 7531153e..c9c2bc0a 100644
            onValueChange={setAc3Encode}
          />
        )}
-+      {tvos && (
++      {tvos && audioChannels === 'auto' && (
 +        <Switch
 +          side="right"
 +          label={OBJECT_AUDIO.label}
@@ -96,7 +96,7 @@ index 7531153e..c9c2bc0a 100644
 +          onValueChange={setObjectAudio}
 +        />
 +      )}
-+      {tvos && objectAudio && (
++      {tvos && audioChannels === 'auto' && objectAudio && (
 +        <Select
 +          label={OBJECT_AUDIO.layoutLabel}
 +          help={OBJECT_AUDIO.layoutHelp}
@@ -119,7 +119,7 @@ index 7531153e..c9c2bc0a 100644
 +/* eslint-disable lingui/no-unlocalized-strings -- the Apple TV app's own build, untranslated */
 +const OBJECT_AUDIO = {
 +  label: 'Object audio for TrueHD Atmos and DTS:X',
-+  help: 'Keeps their heights and objects, rendered for your speakers, instead of playing their 7.1. Needs tvOS 26 and an Atmos receiver or soundbar on HDMI.',
++  help: 'Keeps their heights and objects, rendered for your speakers, instead of playing their 7.1. Needs tvOS 26 and an Atmos receiver or soundbar on HDMI. Dialogue boost and night mode turn it off.',
 +  layoutLabel: 'Speakers',
 +  layoutHelp: 'The layout object audio is rendered for. Your receiver or soundbar fits it to the speakers it has, so choose 9.1.6 only for a system with wide and middle height speakers.',
 +  layouts: {

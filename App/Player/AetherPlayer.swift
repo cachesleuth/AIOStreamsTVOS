@@ -193,7 +193,12 @@ final class AetherPlayer {
         // engine's software player (AV1, VP9, interlaced H.264, Hardware decoding off) the same setting
         // also hands an E-AC-3 Atmos track to tvOS's renderer compressed, which played nothing when
         // tried (de850fa), so with the switch on that one case may be silent.
-        if settings.objectAudio { options.objectAudioRendering = .render(settings.objectAudioLayout) }
+        // Only with the page's Audio channels on Automatic, the one setting the page shows the switch
+        // under: 7.1 is a limit too, and plays their 7.1; Stereo and 5.1 shape the sound, which the
+        // engine would put ahead of the render anyway.
+        if settings.objectAudio && settings.audioChannels == "auto" {
+            options.objectAudioRendering = .render(settings.objectAudioLayout)
+        }
         options.audioShaping = shaping
         options.audioDelaySeconds = settings.audioDelayMs / 1000
         if !settings.hardwareDecoding { options.preferredDecodePath = .software }
