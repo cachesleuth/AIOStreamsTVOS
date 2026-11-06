@@ -34,7 +34,7 @@ index a8883d58..b83ccf39 100644
        ? [
            { name: 'mpv', help: t`Plays the video.`, url: 'https://mpv.io' },
            {
-@@ -164,3 +171,47 @@ function credits(
+@@ -164,3 +171,52 @@ function credits(
        : []),
    ];
  }
@@ -64,6 +64,11 @@ index a8883d58..b83ccf39 100644
 +    name: 'libdovi',
 +    help: 'Reads and converts the Dolby Vision metadata.',
 +    url: 'https://github.com/quietvoid/dovi_tool',
++  },
++  {
++    name: 'LibTrueHD',
++    help: 'Decodes TrueHD Atmos objects for object audio.',
++    url: 'https://github.com/superuser404notfound/LibTrueHD',
 +  },
 +  {
 +    name: 'libzvbi',

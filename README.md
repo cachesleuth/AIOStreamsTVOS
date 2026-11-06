@@ -11,6 +11,25 @@ desktop and Android apps do, and turns the Siri Remote into the keys the page al
 It is unofficial and experimental. It uses private tvOS APIs, so it can't go on the App Store; the
 IPA is sideloaded.
 
+## Installing
+
+Needs an Apple TV on tvOS 18 or later. The IPA is unsigned, so a sideloading tool that handles
+Apple TV signs it with your own Apple ID before installing it; with a free Apple ID the signature
+lasts 7 days, with a paid developer account a year.
+
+- **From a sideloading source**: add
+  `https://raw.githubusercontent.com/mickey2266/AIOStreamsTVOS/main/altstore/source.json` to an
+  Apple TV sideloader that reads AltStore-format sources (FlareStore, for one). It lists every
+  release and offers each new one as an update. AltStore and SideStore can add it too, but neither
+  installs to an Apple TV.
+- **By hand**: download `AIOStreams.ipa` from the latest
+  [release](https://github.com/mickey2266/AIOStreamsTVOS/releases/latest), or the **Nightly**
+  prerelease for the newest build of `main`, and open it in your sideloading tool.
+
+Then sign in to your Jellyfin server in the app, as in AIOStreams' web app. For Dolby Atmos, set
+the Apple TV's **Settings → Video and Audio → Audio Format** to **Auto**, and keep **Continuous
+Audio Connection** off (see Dolby Atmos below).
+
 ## How it fits together
 
 ```
@@ -65,8 +84,11 @@ PCM and never Atmos.
   TrueHD Atmos and DTS:X play as their 7.1, without the objects and heights. A receiver takes PCM
   over HDMI or eARC; a soundbar behind a TV's plain ARC gets stereo.
 - **Object audio** (Settings → Audio → Output on the page, tvOS only, off by default, from the
-  next video): the engine renders TrueHD Atmos objects and DTS:X heights into the Speakers layout
-  under the switch, 7.1.4 (the default) or 9.1.6, which tvOS sends to the receiver as 12 or 16
+  next video; `patches/web/0012-tvos-object-audio-switch.patch`): the engine renders TrueHD Atmos
+  objects and DTS:X heights into the Speakers layout under the switch, 7.1.4 (the default) or
+  9.1.6. Since AetherEngine 7.57 it builds that bed from the track's own lossless 7.1 (DTS:X's 7.1
+  with its heights folded in), with the objects and heights steering it onto the speakers above
+  and around, rather than mixing a decode of the objects themselves. tvOS sends it to the receiver as 12 or 16
   channels of PCM inside Dolby MAT, so it shows Atmos; the receiver fits it to the speakers it has,
   so 7.1.4 is the one for every smaller system. 9.1.6 places objects on wides and middle heights
   instead of leaving the receiver to spread them there. The switch and Speakers show only with
@@ -97,7 +119,13 @@ For Atmos at all, set **Settings → Video and Audio → Audio Format** to **Aut
 **Dolby Atmos**) on the Apple TV.
 
 **Settings → Video and Audio → Audio Format → Continuous Audio Connection** decides how decoded
-sound reaches the receiver. With it off, on a Samsung TV with a Samsung HW-Q990F soundbar on eARC:
+sound reaches the receiver. **Keep it off.** Turn it on only if surround the Apple TV decodes
+(TrueHD, DTS-HD, or any track the page reshapes) keeps playing as stereo, and turning on the app
+menu's Dolby primer (below) doesn't fix it. With it on, decoded sound reaches the receiver as
+multichannel, but it may use the wrong channel mapping, with surround channels playing from the
+wrong speakers.
+
+With it off, some setups take decoded sound only as stereo. On a TV and soundbar on eARC that do:
 
 - Sound the Apple TV decodes plays as stereo: TrueHD and DTS-HD, and any track the page's Audio
   channels, dialogue boost or night mode reshapes. The session asks for 8 channels and gets them
@@ -134,9 +162,9 @@ sound reaches the receiver. With it off, on a Samsung TV with a Samsung HW-Q990F
 - Picture in picture closes on an HDR or frame-rate video: the window opens, the video goes back
   full screen, then the TV goes to the Home screen.
 
-With it on, both work: multichannel PCM and the window over the Home screen. On the HW-Q990F,
-though, the left and right surrounds then played from the front speakers, so this setup keeps it
-off and turns the Dolby primer on. With it on,
+With it on, both work: multichannel PCM and the window over the Home screen. It may use the wrong
+channel mapping, though, which is why it's best off, with the Dolby primer on where decoded
+surround plays as stereo. With it on,
 tvOS sends all sound inside Dolby MAT, decoded PCM included, which the TV passes over eARC intact;
 with it off, decoded sound goes out as plain PCM, which this TV's eARC takes only as stereo. The
 picture-in-picture failure is likely, but unconfirmed, tvOS setting the HDMI audio link up again
@@ -253,8 +281,10 @@ the bridge script adds the button to the page's controls, in the look of the pag
   screen.
 - The app has the `audio` background mode, which tvOS needs to keep playing in the window, and the
   engine keeps its session through the background while the window shows.
-- Untested: the engine declares the long-form audio policy for HDMI, which blocks picture in
-  picture on iOS. If tvOS does the same, the button says it isn't available after 4 seconds.
+- The audio session's long-form audio policy, which the app and the engine declare on tvOS for
+  HDMI, doesn't block the window here; it blocks picture in picture only on iOS, where the engine
+  declares the default policy instead. If tvOS doesn't allow the window within 4 seconds, the
+  button says it isn't available.
 
 ### Top Shelf
 
@@ -293,6 +323,19 @@ the page slides the whole page in layers for each key press, and a held key's re
 several slides running. The bridge script lets a held key's repeats, and presses as quick as them,
 jump to each row instead; a single press still slides.
 
+Two more of the bridge script's switches, set while chasing those memory kills, are still off:
+
+- **`EFFECTS`**: no masks, filters or backdrop filters anywhere. WebKit draws each into a surface
+  of its own at the TV's 2x scale, and the kills came within a second or two of an item page
+  opening its version picker, which draws its backdrop under two masks or a poster under a blur
+  across most of the screen. Edges that would fade end sharply, and blurred washes are plain.
+  The few washes the page needs are drawn once on a tiny canvas instead (patches 0004 and 0005).
+- **`LAYERS`**: nothing kept as a layer at rest (`will-change`), except the glide layers the slides
+  use, and loading placeholders hold still instead of pulsing. The rotating hero kept several
+  full-screen backdrops as standing layers, about 33 MB each at the TV's 2x.
+
+Setting either back to `true` in `App/Web/BridgeScript.swift` draws them again.
+
 ### Posing as the Android TV app
 
 The web app picks its behaviour from the bridge's `platform`, and only knows `android`, `windows`,
@@ -316,7 +359,7 @@ Back behaviour and the bundled-player path. It also means:
   - **Pass surround audio through** and its formats: an Apple TV copies Dolby Digital (Plus) and
     decodes the rest to PCM whatever is asked.
 - Settings → About names the app's version **tvOS app**, and its Credits list AetherEngine as the
-  player, with FFmpeg, dav1d, libdovi, libzvbi, libass and VideoToolbox, rather than mpv
+  player, with FFmpeg, dav1d, libdovi, LibTrueHD, libzvbi, libass and VideoToolbox, rather than mpv
   (`patches/web/0010-tvos-about-names-its-engine.patch`). They're in English only.
 - Settings → **Donate** lists the GitHub Sponsors and Ko-fi links as text
   (`https://github.com/sponsors/Viren070`, `https://ko-fi.com/Viren070`) rather than buttons that
@@ -345,7 +388,7 @@ Back behaviour and the bundled-player path. It also means:
 | Click in a searchable list          | Such as Discover's catalog picker: after moving through it with Up or Down, picks the highlighted entry; straight away, opens the keyboard to search |
 | Back / Menu                         | The page's Back; twice on Home leaves the app     |
 | Play/Pause                          | Play/Pause                                        |
-| **Hold Play/Pause (1 s)**           | App menu: the app's diagnostics (move left onto them, then swipe or click up and down to scroll), play a test video from a link, reload, switch the source connection, or reset the app's data |
+| **Hold Play/Pause (1 s)**           | App menu: the app's diagnostics (move left onto them, then swipe or click up and down to scroll), play a test video from a link, reload, switch the source connection, turn the Dolby primer on or off, or reset the app's data |
 
 ## Saved data
 
@@ -370,15 +413,8 @@ handles Apple TV; with a free Apple ID the signature lasts 7 days, with a paid a
 
 ### Sideloading source
 
-Tagged releases are listed in an AltStore-format source, which SideStore reads too:
-
-```
-https://raw.githubusercontent.com/mickey2266/AIOStreamsTVOS/main/altstore/source.json
-```
-
-AltStore and SideStore can add it, but neither installs to an Apple TV itself. An Apple TV
-sideloader that reads the same format (FlareStore, for one) subscribes to it, signs the IPA and
-sends it to a paired Apple TV, and offers each new release as an update. The build workflow adds
+Tagged releases are listed in the AltStore-format source in `altstore/source.json` (see
+Installing). The build workflow adds
 every `v*` release to the source (`scripts/update-source.py`, the version and build from
 `project.yml`), so a release is tagged after `MARKETING_VERSION` is bumped to match. The nightly
 isn't listed.
