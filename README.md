@@ -1,3 +1,5 @@
+Disclaimer: This project is vibecoded with Claude. The web app itself is the official web app from the aiostreams repo, but all the stuff on top to make it work for tvOS is courtesy of Claude.
+
 # AIOStreams for Apple TV
 
 The [AIOStreams](https://github.com/Viren070/AIOStreams) web app's standalone build (the one that
