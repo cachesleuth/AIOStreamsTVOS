@@ -1,0 +1,26 @@
+# This fork's own settings, on top of upstream's project.yml, which stays untouched
+# so pulling upstream never conflicts. Generate with:
+#   xcodegen generate --spec project.local.yml
+# (scripts/build-install.sh does). XcodeGen merges this file over the included one.
+include:
+  - project.yml
+options:
+  bundleIdPrefix: com.cachesleuth.aiostreams
+settings:
+  base:
+    DEVELOPMENT_TEAM: "6KC446Z2QT"
+targets:
+  AIOStreamsTV:
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cachesleuth.aiostreams.tvos
+  AIOStreamsTopShelf:
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cachesleuth.aiostreams.tvos.topshelf
+        # Xcode links tv-app-extension targets with -e _TVExtensionMain; on tvOS 27.2
+        # that exits (status 3) before the provider loads. NSExtensionMain runs it.
+        # Sent upstream; drop this once project.yml has it.
+        OTHER_LDFLAGS: "-e _NSExtensionMain"
+# The App Group (group.com.cachesleuth.aiostreams.tvos) needs nothing here: the
+# build is signed with each profile's own entitlements, which carry it.

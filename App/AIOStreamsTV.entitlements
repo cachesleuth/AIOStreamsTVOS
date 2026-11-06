@@ -5,7 +5,7 @@
 	<!-- Shared with the Top Shelf extension, which reads what to show from it. -->
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.com.cachesleuth.aiostreams.tvos</string>
+		<string>group.io.github.aiostreams.tvos</string>
 	</array>
 </dict>
 </plist>

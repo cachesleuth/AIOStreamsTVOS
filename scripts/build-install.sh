@@ -3,8 +3,9 @@
 # Run it again to update, or to renew the signature before its year is up.
 #
 #   bash scripts/build-install.sh                  # build, then install on "Front room"
-#   DEVICE="Living Room" bash scripts/build-install.sh
 #   SKIP_WEB=1 bash scripts/build-install.sh       # reuse the WebBuild already there
+#   SKIP_INSTALL=1 bash scripts/build-install.sh   # build and sign only, leave the TV alone
+#   DEVICE="<name>" bash scripts/build-install.sh  # another paired Apple TV
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
@@ -23,7 +24,8 @@ if [ "${SKIP_WEB:-0}" != "1" ] || [ ! -d WebBuild ]; then
   bash scripts/fetch-web.sh
 fi
 
-xcodegen generate
+# project.local.yml is this fork's team, bundle IDs and linker fix over upstream's project.yml.
+xcodegen generate --spec project.local.yml
 
 # Built unsigned, as the CI does, then signed by hand below: Xcode has no Apple ID
 # signed in, and xcodebuild won't take the API key for development signing.
@@ -45,7 +47,8 @@ test -d "$app" || { echo "No app at $app" >&2; exit 1; }
 # the developer portal (the API can't create App Groups); signing copies each
 # profile's Entitlements, so the app and the Top Shelf get the group from them.
 identity="${SIGN_IDENTITY:-Apple Development: Created via API (J3326UND22)}"
-profiles="build/profiles"
+# Kept outside the repo so cleaning build/ never deletes them.
+profiles="${PROFILES:-$HOME/Library/Application Support/AIOStreamsTVOS/profiles}"
 sign() { # bundle, profile
   local ent
   ent="$(mktemp -t aio-ent).plist"
@@ -62,5 +65,9 @@ sign "$shelf" "$profiles/topshelf.mobileprovision"
 sign "$app" "$profiles/app.mobileprovision"
 codesign --verify --deep --strict "$app"
 
+if [ "${SKIP_INSTALL:-0}" = "1" ]; then
+  echo "Built and signed: $app (not installed)."
+  exit 0
+fi
 xcrun devicectl device install app --device "$device" "$app"
 echo "Installed on $device."

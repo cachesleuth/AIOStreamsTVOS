@@ -56,7 +56,7 @@ struct TopShelfItem: Codable, Equatable {
  * the newest copy it finds in any.
  */
 enum TopShelfStore {
-    static let declaredGroup = "group.com.cachesleuth.aiostreams.tvos"
+    static let declaredGroup = "group.io.github.aiostreams.tvos"
 
     /// The Top Shelf's artwork width, in pixels: 548 points at 2x.
     static let imageWidth = 1096
