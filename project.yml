@@ -88,5 +88,9 @@ targets:
         TARGETED_DEVICE_FAMILY: "3"
         CODE_SIGN_STYLE: Automatic
         APPLICATION_EXTENSION_API_ONLY: YES
+        # Xcode links tv-app-extension targets with -e _TVExtensionMain; on tvOS
+        # 27.2 that exits (status 3) before the provider loads. NSExtensionMain
+        # is the entry point for TVTopShelfContentProvider extensions.
+        OTHER_LDFLAGS: "-e _NSExtensionMain"
     dependencies:
       - sdk: TVServices.framework

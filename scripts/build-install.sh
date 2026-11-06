@@ -41,8 +41,9 @@ test -d "$app" || { echo "No app at $app" >&2; exit 1; }
 
 # tvOS development profiles made through the App Store Connect API (valid to
 # 2027-11-06), for the Front room Apple TV and the "Apple Development: Created
-# via API" certificate. No App Group yet: the API can't create one, so the Top
-# Shelf has nothing to read until the group is added in the developer portal.
+# via API" certificate. Both carry group.com.cachesleuth.aiostreams.tvos, made in
+# the developer portal (the API can't create App Groups); signing copies each
+# profile's Entitlements, so the app and the Top Shelf get the group from them.
 identity="${SIGN_IDENTITY:-Apple Development: Created via API (J3326UND22)}"
 profiles="build/profiles"
 sign() { # bundle, profile
